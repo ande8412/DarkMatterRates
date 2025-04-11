@@ -38,7 +38,7 @@ class form_factor(object):
           self.VCell = data['results'].attrs['VCell'] * nu.eV
           self.mCell = data['results'].attrs['mCell'] * nu.eV
           self.mCell/= nu.c0**2 #in mass units
-          self.dq = data['results'].attrs['dq']*nu.alphaFS * me_eV
+          self.dq = data['results'].attrs['dq']*nu.alphaFS * nu.me * nu.c0
           self.dE = data['results'].attrs['dE'] * nu.eV
           
           
@@ -104,10 +104,49 @@ class form_factorQEDark(object):
         """
         materials = {'Si': [(2*28.0855) , 2.0, 1.2, 3.8,wk/4*fcrys],'Ge': [2*72.64, 1.8, 0.7, 3,wk/4*fcrys]}
         self.ff = fcrys*wk/4
-        self.dq = .02*nu.alphaFS*me_eV
+        self.dq = .02*nu.alphaFS * nu.me * nu.c0
         self.dE = 0.1 * nu.eV
         self.mCell = ATOMIC_WEIGHT[self.material]#materials[self.material][0] *nu.amu #mass units
         
         self.band_gap = materials[self.material][2]*nu.eV
      #    self.Eprefactor = materials[self.material][1]
         
+
+class formFactorNoble(object):
+     #TODO
+     #should change from pickle files  to better format to avoid compatability issues
+     def __init__(self,filename):
+          from scipy.interpolate import RegularGridInterpolator, interp1d
+          import numpy as np
+          import pickle
+          if 'Xe' in filename:
+               self.material = 'Xe'
+          elif 'Ar' in filename:
+               self.material = 'Ar'
+          else:
+               raise ValueError('Unknown material')
+          
+
+          with open(filename, mode='rb') as f:
+               shell_data = pickle.load(f)
+          keys = list(shell_data.keys())
+          for _shell_, _sd_ in shell_data.items():
+               _sd_['log10ffsquared_itp'] = RegularGridInterpolator(
+                    (_sd_['lnks'], _sd_['lnqs']),
+                    np.log10(_sd_['ffsquared']),
+                    bounds_error=False, fill_value=-float('inf'),)
+               
+          self.keys = keys
+
+          self.shell_data = shell_data
+          self.mCell = ATOMIC_WEIGHT[self.material]
+
+          
+
+
+
+
+
+
+     
+

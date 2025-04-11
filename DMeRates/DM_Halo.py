@@ -83,7 +83,7 @@ class DM_Halo_Distributions:
         q_tiled = torch.tile(q,(len(E),1))
         EE_tiled = torch.tile(E,(len(q),1)).T
         vmins = ((EE_tiled/q_tiled)+(q_tiled/(2*mX)))
-        return  vmins*nu.c0 
+        return  vmins
     
 
 
