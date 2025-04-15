@@ -59,7 +59,7 @@ class DM_Halo_Distributions:
             etas.append(eta)
         etas = np.array(etas)
         lightSpeed_kmpers = nu.s / nu.km #inverse to output it in units i want
-        geVconversion = nu.cm**3 / nu.GeV
+        geVconversion = 1 / (nu.GeV / nu.c0**2 / nu.cm**3)
         import os
         module_dir = os.path.dirname(__file__)
         filepath = os.path.join(module_dir,'../halo_data')

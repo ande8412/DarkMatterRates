@@ -249,6 +249,8 @@ class DMeRate:
             
         else:
             file = f'{dir}mDM_{mass_string}_MeV_sigmaE_{sigmaE_str}_cm2/DM_Eta_theta_{isoangle}.txt'
+        
+        print(f"Using Halo Data from: {file}")
         if not os.path.isfile(file):
             print(file)
             raise FileNotFoundError('sigmaE file not found')
@@ -455,22 +457,30 @@ class DMeRate:
 
         etas = self.get_halo_data(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors) #inverse velocity
         #ccms**2*sec2yr
-
         etas*=self.rhoX/mX * self.cross_section * nu.c0**2
         etas = etas.to(torch.double)
         return etas # inverse time
 
 
     def vectorized_dRdE(self,mX,FDMn,halo_model,DoScreen=True,isoangle=None,halo_id_params=None,integrate=True,useVerne=False,calcErrors=None,debug=False,unitize=False):
-        mX = mX*nu.MeV  / nu.c0**2
         import torch
+        integrate_eta = True if integrate else False
+
+        mX = mX*nu.MeV  / nu.c0**2
+
+
         rm = self.reduced_mass(mX,nu.me)
+
         # rm = self.reduced_mass(mX,me_eV)
         prefactor = nu.alphaFS * ((nu.me/rm)**2) * (1 / self.form_factor.mCell)
 
         fdm_factor = (self.FDM(self.qArr,FDMn))**2 #unitless
         vMins = self.vMin_tensor(self.qArr,self.Earr,mX)
-        etas = self.get_parametrized_eta(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+        if not integrate_eta:
+           
+            etas = self.get_parametrized_eta(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+        else:
+            etas = torch.ones_like(vMins)
         ff_arr = self.form_factor.ff
 
         if self.QEDark:
@@ -495,7 +505,6 @@ class DMeRate:
         result*=ff_arr
         result *=tf_factor
 
-        
         if integrate:
             import torchquad
             torchquad.set_log_level('ERROR')
@@ -509,9 +518,35 @@ class DMeRate:
             qmin = self.qArr[0]
             qmax = self.qArr[-1]
             integration_domain = torch.Tensor([[qmin,qmax]])
-            def momentum_integrand(q):
-                qdenom = 1/q**2
-                return torch.einsum("j,ij->ji",qdenom.flatten(),grid)
+            if integrate_eta:
+                def momentum_integrand(q):
+                    vmin = (self.Earr / q) + (q / 2 *mX)
+                    qdenom = 1/q**2
+                    eta = self.get_parametrized_eta(vmin,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+                    # eta = torch.where(vmin > self.vEarth + self.vEscape,0,eta)
+
+                    integrand = eta * qdenom 
+                    # print(eta.shape)
+                    # result = torch.einsum("j,ij->ji",qdenom.flatten(),grid)
+                    result = eta * grid
+                    # result *= eta
+                    # result = torch.einsum("i,ij->ji",eta,result)
+
+                        # if shell_key is not None:
+
+                        # EE_tiled += binding_es[self.material][shell_key]
+
+                        # vMin = ((EE_tiled/q_tiled)+(q_tiled/(2*mX)))
+
+
+                    return result
+
+            else:
+                def momentum_integrand(q):
+                    qdenom = 1/q**2
+
+
+                    return torch.einsum("j,ij->ji",qdenom.flatten(),grid)
             integrated_result = simp.integrate(momentum_integrand, dim=1, N=numq, integration_domain=integration_domain) / self.Earr
 
 
@@ -888,6 +923,69 @@ class DMeRate:
     
     
     
+
+    def generate_dat(self,dm_masses,ne_bins,fdm,dm_halo_model,DoScreen=False,write=True):
+        import torch
+        from tqdm.autonotebook import tqdm
+        import numpy as np
+        function_name = 'p100k' if self.ionization_func == self.RKProbabilities else 'step'
+        fdm_dict = {0:'1',1:'q',2:'q2'}
+        rho_X =self.rhoX / (nu.GeV / nu.c0**2 / nu.cm**3)
+        vE = self.vEarth  / (nu.km / nu.s)
+        vesc = self.vEscape    / (nu.km / nu.s)
+        v0 = self.v0 / (nu.km / nu.s)
+        rho_X_print = str(np.round(rho_X,1))
+        ebin_print = str(self.bin_size)
+        vesc_print = str(np.round(vesc,1))
+        v0_print = str(np.round(v0,1))
+        vE_print = str(np.round(vE,1))
+
+
+        ebin_print = ebin_print.replace('.','pt')
+        rho_X_print = rho_X_print.replace('.','pt')
+        vesc_print = vesc_print.replace('.','pt')
+        v0_print = v0_print.replace('.','pt')
+        vE_print = vE_print.replace('.','pt')
+
+
+        import os
+        FDM_Dir = os.path.join(self.module_dir,'Rates/')
+        screen = '_screened' if DoScreen else ''
+        integrate = True
+        if self.material == 'Si':
+            qestr = '_qedark' if self.QEDark else '_qcdark'
+            integrate = False if self.QEDark else True
+
+        
+      
+        filename = FDM_Dir + f'FDM{fdm_dict[fdm]}_vesc{vesc_print}-v0{v0_print}-vE{vE_print}-rhoX{rho_X_print}_nevents_func{function_name}_maxne{np.max(ne_bins)}_unscaled{screen}{qestr}_dmerates.dat'
+        
+        lines = []
+        data = np.zeros((len(dm_masses),len(ne_bins)))
+        for m in tqdm(range(len(dm_masses))):
+            mX = dm_masses[m]
+            line = f'{mX}\t'
+            gday = self.calculate_rates(mX,dm_halo_model,fdm,ne_bins,integrate=integrate,DoScreen=DoScreen).T * nu.g * nu.day
+            gday = gday[0]
+            gday = torch.where(torch.isnan(gday),0,gday)
+            g_day = gday.numpy()
+            for ne in ne_bins:
+                data[m,ne - 1] = g_day[ne-1]
+                line+=str(g_day[ne-1])+'\t'
+                
+            line += f'\n'
+            lines.append(line)
+        if write: 
+            f = open(filename,'w')
+            first_line = f'FDM{fdm_dict[fdm]}:\tmX [MeV]\tsigmae={self.cross_section / nu.cm**2} [cm^2]\t'
+            for ne in ne_bins:
+                first_line += f'ne{ne}\t'
+            first_line+='\n'
+            f.write(first_line)
+            for line in lines:
+                f.write(line)
+        return data
+
         
 
     
