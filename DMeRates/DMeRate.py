@@ -309,7 +309,7 @@ class DMeRate:
 
         lightSpeed_kmpers = nu.s / nu.km #inverse to output it in units i want
 
-        geVconversion = nu.cm**3 / nu.GeV
+        geVconversion = 1 / (nu.GeV / nu.c0**2/ nu.cm**3)
         halo_prefix = '../halo_data/'
 
         halo_dir_prefix = os.path.join(self.module_dir,halo_prefix) 
@@ -325,8 +325,12 @@ class DMeRate:
         try:
             data = loadtxt(file,delimiter='\t')
         except ValueError:
-            print(file)
-            raise ValueError(f'file not found! tried {file}')
+            try:
+                self.DM_Halo.generate_halo_files(halo_model)
+            except:
+                raise ValueError("Unknown halo type")
+            data = loadtxt(file,delimiter='\t')
+            
         if len(data) == 0:
             raise ValueError('file is empty!')
         
@@ -424,6 +428,27 @@ class DMeRate:
         else:
             result = torch.ones_like(q_arr_tiled)
         return result
+    
+    def thomas_fermi_screening(self,q,E,doScreen=True):
+        tfdict = tf_screening[self.material]
+        eps0,qTF,omegaP,alphaS = tfdict['eps0'],tfdict['qTF'],tfdict['omegaP'],tfdict['alphaS']
+        E_eV = E / nu.eV
+        q_eV = q/ (nu.eV / nu.c0)
+        omegaP_ = omegaP/nu.eV
+        qTF_ = qTF/nu.eV
+        
+        mElectron_eV = me_eV/nu.eV
+        if doScreen:
+            result = alphaS*((q_eV/qTF_)**2)
+            result += 1.0/(eps0 - 1)
+            result += q_eV**4/(4.*(mElectron_eV**2)*(omegaP_**2))
+            result -= (E_eV/omegaP_)**2
+            result = 1. / (1. + 1. / result)
+        else:
+            result = 1.
+
+        return result
+        
 
     def vMin_tensor(self,qArr,Earr,mX,shell_key=None):
         import torch
@@ -464,46 +489,12 @@ class DMeRate:
 
     def vectorized_dRdE(self,mX,FDMn,halo_model,DoScreen=True,isoangle=None,halo_id_params=None,integrate=True,useVerne=False,calcErrors=None,debug=False,unitize=False):
         import torch
-        integrate_eta = True if integrate else False
 
         mX = mX*nu.MeV  / nu.c0**2
-
-
         rm = self.reduced_mass(mX,nu.me)
-
-        # rm = self.reduced_mass(mX,me_eV)
         prefactor = nu.alphaFS * ((nu.me/rm)**2) * (1 / self.form_factor.mCell)
 
-        fdm_factor = (self.FDM(self.qArr,FDMn))**2 #unitless
-        vMins = self.vMin_tensor(self.qArr,self.Earr,mX)
-        if not integrate_eta:
-           
-            etas = self.get_parametrized_eta(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
-        else:
-            etas = torch.ones_like(vMins)
         ff_arr = self.form_factor.ff
-
-        if self.QEDark:
-            ff_arr = ff_arr[:,self.Ei_array-1]
-
-        ff_arr = ff_arr.T
-        ff_arr = torch.from_numpy(ff_arr)
-        ff_arr = ff_arr.to(self.device) #form factor (unitless)
-
-
-
-        tf_factor = (self.TFscreening(DoScreen)**2) #unitless
-
-
-        
-
-        # if not self.QEDark:
-        result = torch.einsum("i,ij->ij",self.Earr,etas)
-
-
-        result *= fdm_factor     
-        result*=ff_arr
-        result *=tf_factor
 
         if integrate:
             import torchquad
@@ -513,52 +504,79 @@ class DMeRate:
             set_up_backend("torch", data_type="float64")
             from torchquad import Simpson
             simp = Simpson()
-            grid = result[:,:-1]#.to(torch.double)
-            numq = len(self.qArr) 
+            numq = len(self.qArr)
+            numE = len(self.Earr)
             qmin = self.qArr[0]
             qmax = self.qArr[-1]
+
+            from scipy.interpolate import RegularGridInterpolator
+            qArr_unit = self.qArr /(nu.eV/nu.c0)
+            Earr_unit = self.Earr/nu.eV
+
+            # construct an interpolator to allow for flexible number of q in integration
+            #warning, don't change this too drastically from the total number of qs, the form factor is not very smooth
+            ff_interp = RegularGridInterpolator(
+                    (qArr_unit,Earr_unit),
+                    ff_arr,
+                    bounds_error=False, fill_value=-float('inf'),)
+            
+            ff_interp_tensor = torch.zeros((numq,numE))
+            qGrid = torch.linspace(self.qArr.min(),self.qArr.max(),numq) /(nu.eV/nu.c0)
+            
+            for i,E in enumerate(Earr_unit):
+                ff_interp_tensor[:,i] = torch.tensor(ff_interp((qGrid,E)))
+
+            ff_arr = ff_interp_tensor
+
+
             integration_domain = torch.Tensor([[qmin,qmax]])
-            if integrate_eta:
-                def momentum_integrand(q):
-                    vmin = (self.Earr / q) + (q / 2 *mX)
-                    qdenom = 1/q**2
-                    eta = self.get_parametrized_eta(vmin,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
-                    # eta = torch.where(vmin > self.vEarth + self.vEscape,0,eta)
-
-                    integrand = eta * qdenom 
-                    # print(eta.shape)
-                    # result = torch.einsum("j,ij->ji",qdenom.flatten(),grid)
-                    result = eta * grid
-                    # result *= eta
-                    # result = torch.einsum("i,ij->ji",eta,result)
-
-                        # if shell_key is not None:
-
-                        # EE_tiled += binding_es[self.material][shell_key]
-
-                        # vMin = ((EE_tiled/q_tiled)+(q_tiled/(2*mX)))
-
-
-                    return result
-
-            else:
-                def momentum_integrand(q):
-                    qdenom = 1/q**2
-
-
-                    return torch.einsum("j,ij->ji",qdenom.flatten(),grid)
+            def vmin(q,E,mX):
+                term1 = term1 = E.unsqueeze(0) / q.unsqueeze(1)
+                term2 = q.unsqueeze(1) / (2 * mX)
+                v = term1 + term2
+                return  v
+            def eta_func(vMin):
+                return self.get_parametrized_eta(vMin,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+            
+            def momentum_integrand(q):
+                q = q.flatten()
+                #q only parts
+                qdenom = 1/q**2
+                qdenom *=(self.FDM(q,FDMn))**2
+                #parts that depend on q and E
+                eta = eta_func(vmin(q,self.Earr,mX))
+                tf_f = (self.thomas_fermi_screening(q,self.Earr,doScreen=DoScreen))**2
+                ff_f = ff_arr[:-1,:]
+                # ff_f = ff_interp((q,Earr_unit))
+                result = eta * tf_f * ff_f
+                result = torch.einsum("i,ji->ji",self.Earr,result)
+                result = torch.einsum("j,ji->ji",qdenom,result)
+                return result
             integrated_result = simp.integrate(momentum_integrand, dim=1, N=numq, integration_domain=integration_domain) / self.Earr
 
-
+          
                         
         else:
+            fdm_factor = (self.FDM(self.qArr,FDMn))**2 #unitless
+            vMins = self.vMin_tensor(self.qArr,self.Earr,mX)
+            etas = self.get_parametrized_eta(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+            if self.QEDark:
+                ff_arr = ff_arr[:,self.Ei_array-1]
+            ff_arr = ff_arr.T
+            ff_arr = torch.from_numpy(ff_arr)
+            ff_arr = ff_arr.to(self.device) #form factor (unitless)
+            tf_factor = (self.TFscreening(DoScreen)**2) #unitless
+            result = torch.einsum("i,ij->ij",self.Earr,torch.ones_like(etas))
+            result *=etas
+            result *= fdm_factor     
+            result*=ff_arr
+            result *=tf_factor
             qdenom = 1 / self.qArr
             result = torch.einsum("j,ij->ij",qdenom,result)
             integrated_result = (torch.sum(result,axis=1) / self.Earr)
 
            
-            
-
+        
         integrated_result *= prefactor
         integrated_result /=nu.c0
         
@@ -566,9 +584,26 @@ class DMeRate:
         if unitize:
             band_gap_result *= nu.year * nu.kg * nu.eV #return in correct units for comparison, otherwise keep it implicit for drdne
         if debug:  
-            print("Returning:")
-            print("band_gap_result,result,etas,prefactor,fdm_factor,ff_arr,tf_factor,qdenom")
-            return band_gap_result,result,etas,prefactor,fdm_factor,ff_arr,tf_factor,(1/self.qArr**2)
+            if integrate:
+                vMins = self.vMin_tensor(self.qArr,self.Earr,mX)
+                etas = self.get_parametrized_eta(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+                tf_factor = (self.TFscreening(DoScreen)**2) #unitless
+                fdm_factor = (self.FDM(self.qArr,FDMn))**2 #unitless
+                ff_arr = ff_arr.T
+
+            returndict = {
+                'drde': band_gap_result,
+                'vMins': vMins / (nu.km / nu.s),
+                'etas': etas * nu.year,
+                'prefactor': prefactor *nu.kg,
+                'fdm_factor':fdm_factor,
+                'ff_arr':ff_arr,
+                'tf_factor': tf_factor,
+                'qdenom': (1/self.qArr**2)
+
+            }
+
+            return returndict
 
         return band_gap_result  #result is in R / kg /year / eV
     

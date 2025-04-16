@@ -37,8 +37,8 @@ class DM_Halo_Distributions:
 
     def generate_halo_files(self,model):
         import numpy as np
-        vhigh = 3*(self.vEarth + self.vEscape)
-        vMins = np.linspace(0,vhigh,10000)
+        vmax = self.vEarth + self.vEscape
+        vMins = np.linspace(0,vmax,1000)
 
         #this next step could use some vectorization, but I will be a bit lazy here
         etas = []
