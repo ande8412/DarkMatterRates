@@ -24,10 +24,12 @@ modulation_study/verne_modulated_rates_screened_qedark_Si
 modulation_study/verne_modulated_rates_unscreened_qedark_Si
 modulation_study/verne_modulated_rates_unscreened_qcdark_Si
 modulation_study/verne_modulated_rates_screened_qcdark_SI
-wimprates_mod
 wimprates_mod/damascus_modulated_rates_Ar
 wimprates_mod/damascus_modulated_rates_Xe
 wimprates_mod/Timon_Ar_results
+wimprates_mod/*.csv
+wimprates_mod/*.png
+
 wimprates_mod/verne_modulated_rates_Ar
 wimprates_mod/verne_modulated_rates_Xe
 QEDark/Mathematica
