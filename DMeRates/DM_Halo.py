@@ -3,10 +3,6 @@ import numericalunits as nu
 class DM_Halo_Distributions:
     def __init__(self,V0=None,VEarth=None,VEscape=None,RHOX=None,crosssection=None):
 
-
-        self.device='cpu'
-
-
         if V0 is None:
             self.v0 = v0
         else:
@@ -32,8 +28,6 @@ class DM_Halo_Distributions:
         else:
             self.cross_section = crosssection
 
-    def optimize(self, device):
-        self.device = device
 
     def generate_halo_files(self,model):
         import numpy as np
@@ -140,12 +134,13 @@ class DM_Halo_Distributions:
     def eta_MB_tensor(self,vMin_tensor):
         """Integrated Maxwell-Boltzmann Distribution"""
         import torch
-        eta = torch.zeros_like(vMin_tensor,device=self.device)
-        val_below = -4.0*self.vEarth*torch.exp(torch.tensor(-(self.vEscape/self.v0)**2,device=self.device)) + torch.sqrt(torch.tensor(torch.pi,device=self.device))*self.v0*(torch.erf((vMin_tensor+self.vEarth)/self.v0) - torch.erf((vMin_tensor - self.vEarth)/self.v0))
-        val_above = -2.0*(self.vEarth+self.vEscape-vMin_tensor)*torch.exp(torch.tensor(-(self.vEscape/self.v0)**2,device=self.device)) + torch.sqrt(torch.tensor(torch.pi,device=self.device))*self.v0*(torch.erf(torch.tensor(self.vEscape/self.v0,device=self.device)) - torch.erf((vMin_tensor - self.vEarth)/self.v0))
+        device = vMin_tensor.device
+        eta = torch.zeros_like(vMin_tensor,device=device)
+        val_below = -4.0*self.vEarth*torch.exp(torch.tensor(-(self.vEscape/self.v0)**2,device=device)) + torch.sqrt(torch.tensor(torch.pi,device=device))*self.v0*(torch.erf((vMin_tensor+self.vEarth)/self.v0) - torch.erf((vMin_tensor - self.vEarth)/self.v0))
+        val_above = -2.0*(self.vEarth+self.vEscape-vMin_tensor)*torch.exp(torch.tensor(-(self.vEscape/self.v0)**2,device=device)) + torch.sqrt(torch.tensor(torch.pi,device=device))*self.v0*(torch.erf(torch.tensor(self.vEscape/self.v0,device=device)) - torch.erf((vMin_tensor - self.vEarth)/self.v0))
         eta = torch.where(vMin_tensor < self.vEscape + self.vEarth, val_above,eta)
         eta = torch.where(vMin_tensor < self.vEscape - self.vEarth, val_below,eta)
-        K = (self.v0**3)*(-2.0*torch.pi*(self.vEscape/self.v0)*torch.exp(torch.tensor(-(self.vEscape/self.v0)**2,device=self.device)) + (torch.pi**1.5)*torch.erf(torch.tensor(self.vEscape/self.v0,device=self.device)))
+        K = (self.v0**3)*(-2.0*torch.pi*(self.vEscape/self.v0)*torch.exp(torch.tensor(-(self.vEscape/self.v0)**2,device=device)) + (torch.pi**1.5)*torch.erf(torch.tensor(self.vEscape/self.v0,device=device)))
         etas = (self.v0**2)*torch.pi/(2.0*self.vEarth*K)*eta 
 
         #not sure if etas is allowed to be zero.
@@ -269,14 +264,14 @@ class DM_Halo_Distributions:
         # vMax = (vEarth + vEscape)*1.1 #can change this later
         vMax = 1000 *nu.km / nu.s
         
-        vis = torch.arange(0,vMax,step = vMax/num_steps,device=self.device)
+        vis = torch.arange(0,vMax,step = vMax/num_steps,device=vMins.device)
         if params.device == 'mps':
             params
         step_heights = torch.exp(params)
 
 
         vMins_tiled = torch.tile(vMins[:,:,None],(1,1,num_steps))
-        vMins_tiled = vMins_tiled.permute(*torch.arange(vMins_tiled.ndim - 1, -1, -1,device=self.device))
+        vMins_tiled = vMins_tiled.permute(*torch.arange(vMins_tiled.ndim - 1, -1, -1,device=vMins.device))
         vis_tiled = torch.tile(vis[:,None,None],(1,vMins.shape[1],vMins.shape[0]))
         step_heights_tiled = torch.tile(step_heights[:,None,None],(1,vMins.shape[1],vMins.shape[0]))
 

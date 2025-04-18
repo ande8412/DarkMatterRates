@@ -51,14 +51,14 @@ def get_halo_data(mX,sigmaE,fdm,isoangle=None,useVerne=True,oldParams=False,calc
     if isoangle is None:
         # return eta_MB
 
-        file = '/Users/ansh/Local/SENSEI/sensei_toy_limit/python/theory_tools/wimprates_mod/eta_shm_v0238_vE250_vEsc544_rhoX0.3.csv'
+        file = 'halo_data/shm_v0238.0_vE250.2_vEsc544.0_rhoX0.3.txt'
         if oldParams:
-            file = f'/Users/ansh/Local/SENSEI/sensei_toy_limit/python/theory_tools/wimprates_mod/eta_shm_v0220_vE244_vEsc544_rhoX0.4.csv'
+            file = 'halo_data/shm_v0220.0_vE244.0_vEsc544.0_rhoX0.4.txt'
         if not os.path.isfile(file):
             # print(useVerne,dir)
             print(file)
             raise FileNotFoundError('halo file not found')
-        data = np.loadtxt(file,delimiter=',')
+        data = np.loadtxt(file)
         file_etas = data[:,1]
         file_vmins = data[:,0]
         eta_func = interp1d(file_vmins,file_etas,fill_value=0,bounds_error=False)
@@ -205,12 +205,12 @@ def get_shelL_data(material):
         # try:
             # file = 'data/dme/dme_ionization_ff.pkl'
         # except FileNotFoundError:
-        file = '/Users/ansh/Local/SENSEI/sensei_toy_limit/python/theory_tools/wimprates_mod/data/dme/dme_ionization_ff.pkl'
+        file = 'wimprates_mod/data/dme/dme_ionization_ff.pkl'
     elif material == 'Ar':
         # try:
         #     file = 'data/dme/dme_ionization_ff_argon.pkl'
         # except FileNotFoundError:
-        file = '/Users/ansh/Local/SENSEI/sensei_toy_limit/python/theory_tools/wimprates_mod/data/dme/dme_ionization_ff_argon.pkl'
+        file = 'wimprates_mod/data/dme/dme_ionization_ff_argon.pkl'
     
     with open(file, mode='rb') as f:
         shell_data = pickle.load(f)

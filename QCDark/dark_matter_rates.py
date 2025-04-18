@@ -114,7 +114,7 @@ def d_rate_fixedE(dq, dE, MCell, E_index, mX, F_crystal2, FDM_exp, screening, as
      rhoX, crosssection = astro_model['rhoX'], astro_model['sigma_e']
      prefactor = (rhoX/mX)*(5.609588e35/MCell)*crosssection*alpha*((mElectron/reducedMass(mX))**2)
      qiArr = np.arange(np.shape(F_crystal2)[0])
-     return prefactor*sp.integrate.simps(momentum_integrand(dq, dE, qiArr, E_index, mX, F_crystal2, FDM_exp, screening, astro_model), x = dq*qiArr + dq/2.0)
+     return prefactor*sp.integrate.simpson(momentum_integrand(dq, dE, qiArr, E_index, mX, F_crystal2, FDM_exp, screening, astro_model), x = dq*qiArr + dq/2.0)
 
 """Find dR/dE as a function of E"""
 def d_rate(mX, form_factor, FDM_exp = 0, screening = default_screening, astro_model = default_astro):
@@ -128,7 +128,7 @@ def d_rate(mX, form_factor, FDM_exp = 0, screening = default_screening, astro_mo
 """total rate"""
 def rate(mX, form_factor, FDM_exp = 0, screening = default_screening, astro_model = default_astro):
      dR, E = d_rate(mX, form_factor, FDM_exp=FDM_exp, screening = screening, astro_model = astro_model)
-     return sp.integrate.simps(dR, x = E)
+     return sp.integrate.simpson(dR, x = E)
 
 """Calculate dR/dQ assuming E2Q generates 1 unit of charge"""
 def d_rate_FanoQ(mX, form_factor, E2Q, FDM_exp = 0, screening = default_screening, astro_model = default_astro):
@@ -138,7 +138,7 @@ def d_rate_FanoQ(mX, form_factor, E2Q, FDM_exp = 0, screening = default_screenin
      numQ, dRbins, Ebins = (numE - initE)//binE, np.array([0.0]), np.array([0.0])
      for i in range(numQ):
           Ebins = np.append(Ebins, (initE + i*binE)*dE)
-          vals = sp.integrate.simps(dR[i*binE + initE: (i+1)*binE + initE], x = E[i*binE + initE: (i+1)*binE + initE])
+          vals = sp.integrate.simpson(dR[i*binE + initE: (i+1)*binE + initE], x = E[i*binE + initE: (i+1)*binE + initE])
           dRbins = np.append(dRbins, vals)
      return Ebins, dRbins
 

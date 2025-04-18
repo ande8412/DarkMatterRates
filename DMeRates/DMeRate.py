@@ -29,7 +29,12 @@ class DMeRate:
         self.rhoX = rhoX 
         self.cross_section = crosssection
         self.material = material
-        self.device = 'cpu'
+        cuda_available = torch.cuda.is_available()
+        if cuda_available:
+            print("CUDA GPU found, performing calculations on GPU")
+        else:
+            print("CUDA GPU not found, performing calculations on cpu (if you are doing this on apple silicon you can change your device to mps if you'd like)")
+        self.device = 'cuda' if cuda_available else 'cpu'
         self.DM_Halo = DM_Halo_Distributions(self.v0,self.vEarth,self.vEscape,self.rhoX,self.cross_section)
 
         if material == 'Si' or material == 'Ge':
@@ -61,14 +66,35 @@ class DMeRate:
             self.nQ = nQ
             
             if QEDark:
-                self.qiArr = torch.arange(1,nQ+1) #for indexing
+                self.qiArr = torch.arange(1,nQ+1,device=self.device) #for indexing
                 self.qArr = torch.clone(self.qiArr) * self.form_factor.dq 
-                self.Earr = torch.arange(nE)*self.form_factor.dE 
+                self.Earr = torch.arange(nE,device=self.device)*self.form_factor.dE 
             else:
-                self.qiArr = torch.arange(nQ) #for indexing
+                self.qiArr = torch.arange(nQ,device=self.device) #for indexing
                 self.qArr = (torch.clone(self.qiArr) * self.form_factor.dq + self.form_factor.dq / 2.0)
-                self.Earr = (torch.arange(nE)*self.form_factor.dE + self.form_factor.dE/2.0)
+                self.Earr = (torch.arange(nE,device=self.device)*self.form_factor.dE + self.form_factor.dE/2.0)
             self.Ei_array = torch.floor(torch.round((self.Earr/nu.eV)*10)).int() #for indexing
+
+
+            # from scipy.interpolate import RegularGridInterpolator
+            # qArr_unit = self.qArr /(nu.eV/nu.c0)
+            # Earr_unit = self.Earr.cpu().numpy()/nu.eV
+
+            # # construct an interpolator to allow for flexible number of q in integration
+            # #warning, don't change this too drastically from the total number of qs, the form factor is not very smooth
+            # ff_interp = RegularGridInterpolator(
+            #         (qArr_unit,Earr_unit),
+            #         self.form_factor.ff,
+            #         bounds_error=False, fill_value=-float('inf'),)
+            # numq = len(self.qArr)
+            # numE = len(self.Earr)
+            # ff_interp_tensor = torch.zeros((numq,numE))
+            # qGrid = np.linspace(self.qArr.min(),self.qArr.max(),numq) /(nu.eV/nu.c0)
+            
+            # for i,E in enumerate(Earr_unit):
+            #     ff_interp_tensor[:,i] = torch.tensor(ff_interp((qGrid,E)),device=self.device)
+
+            # self.ff_interp_tensor = ff_interp_tensor
 
             self.QEDark = QEDark
         elif material == 'Xe' or material == 'Ar':
@@ -76,7 +102,7 @@ class DMeRate:
             Earr = np.geomspace(1, 400, 100) * nu.eV
 
             logkArr  = np.log(Earr / ry) / 2
-            self.Earr = torch.tensor(Earr)
+            self.Earr = torch.tensor(Earr,device=self.device)
             form_factor_file = f'../wimprates_mod/data/dme/{material}_dme_ionization_ff.pkl'        
             form_factor_file_filepath = os.path.join(self.module_dir,form_factor_file)
         
@@ -99,8 +125,8 @@ class DMeRate:
                 for i,k in enumerate(logkArr):
                     ffdata[i,:] = formfactor.shell_data[shell_key]['log10ffsquared_itp']((k,lnqi))
                 ffdata = 10**ffdata
-                ffdata_dict[shell_key] = torch.tensor(ffdata)
-                qArrdict[shell_key] = qArr
+                ffdata_dict[shell_key] = torch.tensor(ffdata,device=self.device)
+                qArrdict[shell_key] = qArr.to(self.device)
 
             self.qArrdict = qArrdict
             self.form_factor.ff = ffdata_dict
@@ -174,8 +200,9 @@ class DMeRate:
         file_probabilities = file_probabilities[ne]
 
         p100_func = interp1d(pEV, file_probabilities, kind = 'linear',bounds_error=False,fill_value=0)
-        probabilities = p100_func(self.Earr)
+        probabilities = p100_func(self.Earr.cpu())
         probabilities = torch.from_numpy(probabilities)
+        probabilities = probabilities.to(self.device)
         return probabilities
 
     def update_crosssection(self,crosssection):
@@ -250,7 +277,7 @@ class DMeRate:
         else:
             file = f'{dir}mDM_{mass_string}_MeV_sigmaE_{sigmaE_str}_cm2/DM_Eta_theta_{isoangle}.txt'
         
-        print(f"Using Halo Data from: {file}")
+        # print(f"Using Halo Data from: {file}")
         if not os.path.isfile(file):
             print(file)
             raise FileNotFoundError('sigmaE file not found')
@@ -286,9 +313,9 @@ class DMeRate:
         vMin_numpy = vMins.cpu().numpy()
         etas = eta_func(vMin_numpy) # inverse velocity
         etas = torch.from_numpy(etas)
-        # if self.device == 'mps':
-        #     etas = etas.float()
-        # etas = etas.to(self.device)
+        if self.device == 'mps':
+            etas = etas.float()
+        etas = etas.to(self.device)
         # etas*=eta_conversion_factor #s/cm
         # etas*=ccms**2*sec2yr*self.rhoX/mX * self.cross_section#year^-1
 
@@ -349,9 +376,9 @@ class DMeRate:
         vMin_numpy = vMins.cpu().numpy()
         etas = eta_func(vMin_numpy) # inverse velocity
         etas = torch.from_numpy(etas)
-        # if self.device == 'mps':
-        #     etas = etas.float()
-        # etas = etas.to(self.device)
+        if self.device == 'mps':
+            etas = etas.float()
+        etas = etas.to(self.device)
         # etas*=eta_conversion_factor #s/cm
         # etas*=ccms**2*sec2yr*self.rhoX/mX * self.cross_section#year^-1
 
@@ -430,23 +457,43 @@ class DMeRate:
         return result
     
     def thomas_fermi_screening(self,q,E,doScreen=True):
+        #param q, tensor with shape 1250
+        #param E, tensor with shape 500
         tfdict = tf_screening[self.material]
         eps0,qTF,omegaP,alphaS = tfdict['eps0'],tfdict['qTF'],tfdict['omegaP'],tfdict['alphaS']
         E_eV = E / nu.eV
         q_eV = q/ (nu.eV / nu.c0)
+        E_eV = E_eV.unsqueeze(0)
+        q_eV = q_eV.unsqueeze(1)
+
+
         omegaP_ = omegaP/nu.eV
         qTF_ = qTF/nu.eV
         
         mElectron_eV = me_eV/nu.eV
         if doScreen:
-            result = alphaS*((q_eV/qTF_)**2)
-            result += 1.0/(eps0 - 1)
-            result += q_eV**4/(4.*(mElectron_eV**2)*(omegaP_**2))
-            result -= (E_eV/omegaP_)**2
+
+            term1 = alphaS * (q_eV / qTF_)**2  # [1249,1] * [1,1] → [1249,1]
+            term2 = 1.0 / (eps0 - 1)           # Scalar → [1,1]
+            term3 = q_eV**4 / (4. * (mElectron_eV**2) * (omegaP_**2))  # [1249,1]
+            term4 = (E_eV / omegaP_)**2        # [1,500] → [1,500]
+            
+            # Explicitly broadcast all terms to [1249,500]
+            result = term1.expand(-1, E_eV.shape[1]) + term2
+            result += term3.expand(-1, E_eV.shape[1])
+            result -= term4.expand(q_eV.shape[0], -1)
+            
             result = 1. / (1. + 1. / result)
+
+
+
+            # result = alphaS*((q_eV/qTF_)**2)
+            # result += 1.0/(eps0 - 1)
+            # result += q_eV**4/(4.*(mElectron_eV**2)*(omegaP_**2))
+            # result -= (E_eV/omegaP_)**2
+            # result = 1. / (1. + 1. / result)
         else:
             result = 1.
-
         return result
         
 
@@ -494,7 +541,7 @@ class DMeRate:
         rm = self.reduced_mass(mX,nu.me)
         prefactor = nu.alphaFS * ((nu.me/rm)**2) * (1 / self.form_factor.mCell)
 
-        ff_arr = self.form_factor.ff
+        ff_arr = torch.tensor(self.form_factor.ff,device=self.device)
 
         if integrate:
             import torchquad
@@ -509,24 +556,9 @@ class DMeRate:
             qmin = self.qArr[0]
             qmax = self.qArr[-1]
 
-            from scipy.interpolate import RegularGridInterpolator
-            qArr_unit = self.qArr /(nu.eV/nu.c0)
-            Earr_unit = self.Earr/nu.eV
-
-            # construct an interpolator to allow for flexible number of q in integration
-            #warning, don't change this too drastically from the total number of qs, the form factor is not very smooth
-            ff_interp = RegularGridInterpolator(
-                    (qArr_unit,Earr_unit),
-                    ff_arr,
-                    bounds_error=False, fill_value=-float('inf'),)
             
-            ff_interp_tensor = torch.zeros((numq,numE))
-            qGrid = torch.linspace(self.qArr.min(),self.qArr.max(),numq) /(nu.eV/nu.c0)
-            
-            for i,E in enumerate(Earr_unit):
-                ff_interp_tensor[:,i] = torch.tensor(ff_interp((qGrid,E)))
 
-            ff_arr = ff_interp_tensor
+            # ff_arr = self.ff_interp_tensor
 
 
             integration_domain = torch.Tensor([[qmin,qmax]])
@@ -563,8 +595,8 @@ class DMeRate:
             if self.QEDark:
                 ff_arr = ff_arr[:,self.Ei_array-1]
             ff_arr = ff_arr.T
-            ff_arr = torch.from_numpy(ff_arr)
-            ff_arr = ff_arr.to(self.device) #form factor (unitless)
+            # ff_arr = torch.from_numpy(ff_arr)
+            # ff_arr = ff_arr.to(self.device) #form factor (unitless)
             tf_factor = (self.TFscreening(DoScreen)**2) #unitless
             result = torch.einsum("i,ij->ij",self.Earr,torch.ones_like(etas))
             result *=etas
@@ -719,7 +751,7 @@ class DMeRate:
 
         #eb = get_binding_es(shell_key)
         fdm_factor = (self.FDM(qArr,FDMn))**2 #unitless
-        vMins = self.vMin_tensor(qArr,self.Earr,mX,shell_key) 
+        vMins = self.vMin_tensor(qArr,self.Earr,mX,shell_key)
         etas = self.get_parametrized_eta(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
             
         try:

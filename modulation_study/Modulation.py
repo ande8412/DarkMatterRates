@@ -50,6 +50,7 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
                 if flat:
                     result = dmrates.calculate_rates(mX,'shm',fdm,ne,integrate=integrate,DoScreen=DoScreen,isoangle=None,useVerne=useVerne,calcErrors=calcError) 
                 else:
+                    print(f"dmrates.calculate_rates({mX},{halo_model},{fdm},{ne},integrate={integrate},DoScreen={DoScreen},isoangle={isoangle},useVerne={useVerne},calcErrors={calcError}) ")
                     result = dmrates.calculate_rates(mX,halo_model,fdm,ne,integrate=integrate,DoScreen=DoScreen,isoangle=isoangle,useVerne=useVerne,calcErrors=calcError) 
                 # if kgday:
                 #     result*= nu.kg *nu.day
@@ -482,7 +483,7 @@ def plot_damascus_output(test_mX,FDMn,cross_section,long=True,savefig=False):
     # plt.tight_layout()
     # plt.title('$\eta$ Distribution vs Isoangle $\Theta$')
     if savefig:
-        plt.savefig(f'/Users/ansh/Local/SENSEI/paper_writing/ModulationTheory/figures/Misc/Eta_{test_mX}MeV_{cross_section}sigmaE_FDM{FDMn}.pdf')
+        plt.savefig(f'figures/Misc/Eta_{test_mX}MeV_{cross_section}sigmaE_FDM{FDMn}.pdf')
     plt.show()
     plt.close
 
@@ -1384,7 +1385,7 @@ def plot_modulation_ne_bins(mX1,mX2,sigmaE1,sigmaE2,material,FDMn,location1='SNO
         plt.ylim(ybounds[0],ybounds[1])
     
     if save:
-        savedir = f'/Users/ansh/Local/SENSEI/paper_writing/ModulationTheory/figures/{material}/'
+        savedir = f'figures/{material}/'
         if fractional:
             frac_str = 'fractional_'
         else:
@@ -2681,7 +2682,7 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
     cbar.ax.tick_params(labelsize=large)
     if savefig:
        
-        savedir = f'/Users/ansh/Local/SENSEI/paper_writing/ModulationTheory/figures/{material}/'
+        savedir = f'figures/{material}/'
         plt.savefig(f'{savedir}/Mod_Sensitivity_{material}_CombinedFig_{ne}ebin_fdm{fdm}.jpg')
 
     # plt.tight_layout()
@@ -3070,7 +3071,7 @@ def plotModulationFigure(fdm,fractional=False,plotConstraints=True,useVerne=True
         else:
             frac_str = ''
 
-        savedir = f'/Users/ansh/Local/SENSEI/paper_writing/ModulationTheory/figures/Combined/'
+        savedir = f'figures/Combined/'
         plt.savefig(f'{savedir}/{frac_str}Mod_Amplitude_CombinedFig_FDM{fdm}.png')
 
     # plt.tight_layout()
@@ -3265,7 +3266,7 @@ def plotRateComparison(material,sigmaE,mX_list,fdm,plotVerne=True,savefig=False,
     plt.xticks(np.linspace(0,180,19)[::2])
     if savefig:
         if savedir is None:
-            savedir = f'/Users/ansh/Local/SENSEI/paper_writing/ModulationTheory/figures/{material}/'
+            savedir = f'figures/{material}/'
             file = f'{material}_Rates_Comparison_FDM{fdm}.pdf'
             savefile = savedir+file
         plt.savefig(savefile)
@@ -3452,7 +3453,7 @@ def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,s
         current_ax.set_ylim(minv,maxv)
     if savefig:
         if savedir is None:
-            savedir = f'/Users/ansh/Local/SENSEI/paper_writing/ModulationTheory/figures/{material}/'
+            savedir = f'figures/{material}/'
             file = f'{material}_Rates_Comparison_FDM{fdm}_subfigs.pdf'
             savefile = savedir+file
         plt.savefig(savefile)
@@ -3672,7 +3673,7 @@ def plotMeanFreePath(FDMn,plotConstraints=True):
 
 
 
-    plt.savefig(f'/Users/ansh/Local/SENSEI/paper_writing/ModulationTheory/figures/Misc/{title_str}Mediator_MFP.pdf')
+    plt.savefig(f'figures/Misc/{title_str}Mediator_MFP.pdf')
     plt.show()
     plt.close()
 
@@ -3758,7 +3759,7 @@ def plotLocationExposure(address1,address2,savefig=True):
     plt.legend()
    
     if savefig:
-        plt.savefig(f'/Users/ansh/Local/SENSEI/paper_writing/ModulationTheory/figures/Misc/IsoLoc.pdf')
+        plt.savefig(f'figures/Misc/IsoLoc.pdf')
     plt.show()
     plt.close()
 

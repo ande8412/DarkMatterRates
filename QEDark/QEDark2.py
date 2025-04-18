@@ -766,6 +766,8 @@ class QEDark:
         import torch
         from .QEDarkConstants import materials,ccms,sec2yr,alpha,me_eV
         # print(halo_id_params,'just passing them in to see (dRdE)')
+        Ee_array = torch.tensor(Ee_array,device=self.device)
+
         q_array = torch.arange(1,self.nq+1,device=self.device)
         q_array_denom = torch.clone(q_array) * self.dQ
         etas = self.get_halo_data(mX,q_array,Ee_array,FDMn,halo_model,isoangle=isoangle,halo_id_params = halo_id_params,forceCalculate=forceCalculate,useVerne=useVerne,calcErrors=calcError)
