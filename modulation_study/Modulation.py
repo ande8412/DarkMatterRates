@@ -167,7 +167,7 @@ def generate_modulated_rates(material,FDMn,useQCDark = True,useVerne=True,calcEr
                 
     return
 
-def generate_damascus_rates_with_error(ne,material,FDMn,useQCDark = True,DoScreen=True,overwrite=False,verbose=False,save=True):
+def generate_damascus_rates_with_error(ne,material,FDMn,useQCDark = True,DoScreen=True,overwrite=False,verbose=False,save=True,fit=False):
     import csv
     import re
     import numpy as np
@@ -249,17 +249,19 @@ def generate_damascus_rates_with_error(ne,material,FDMn,useQCDark = True,DoScree
         rate_per_angle_high = rate_per_angle_high.flatten().cpu().numpy() * nu.g * nu.day
 
         rate_err = rate_per_angle_high - rate_per_angle
-        angle_grid,fit_vector,parameters,errors = fitted_rates(isoangles,rate_per_angle,rate_err)
-        rate_fit = fit_vector[0]
+        if fit:
+            angle_grid,fit_vector,parameters,errors = fitted_rates(isoangles,rate_per_angle,rate_err)
+            rate_fit = fit_vector[0]
 
 
         if save:
             combined= np.vstack((isoangles,rate_per_angle,rate_err))
             combined = combined.T
             np.savetxt(outfile,combined,delimiter=',')
-            combined_fit = np.vstack((angle_grid,rate_fit))
-            combined_fit = combined_fit.T
-            np.savetxt(outfile_fit,combined_fit,delimiter=',')
+            if fit:
+                combined_fit = np.vstack((angle_grid,rate_fit))
+                combined_fit = combined_fit.T
+                np.savetxt(outfile_fit,combined_fit,delimiter=',')
 
                 # with open(outfile,'w') as f:
                 #     print(isoangles,rate_per_angle)
