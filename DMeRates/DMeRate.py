@@ -14,7 +14,7 @@ import numericalunits as nu
 
 
 class DMeRate:
-    def __init__(self,material,QEDark=False):
+    def __init__(self,material,QEDark=False,device=None):
         import torch
         import numpy as np
         import os
@@ -35,6 +35,11 @@ class DMeRate:
         else:
             print("CUDA GPU not found, performing calculations on cpu (if you are doing this on apple silicon you can change your device to mps if you'd like)")
         self.device = 'cuda' if cuda_available else 'cpu'
+        if device is not None:
+            print(f"You have manually specified your device to be: {device}. Overriding default")
+            self.device=device
+
+        torch.set_default_device(self.device)
         self.DM_Halo = DM_Halo_Distributions(self.v0,self.vEarth,self.vEscape,self.rhoX,self.cross_section)
 
         if material == 'Si' or material == 'Ge':
@@ -57,6 +62,13 @@ class DMeRate:
                 ffactor = form_factor(form_factor_file_filepath)
 
             self.ionization_func = self.RKProbabilities
+
+
+            
+
+
+
+
         
             
             self.form_factor = ffactor
@@ -75,6 +87,13 @@ class DMeRate:
                 self.Earr = (torch.arange(nE,device=self.device)*self.form_factor.dE + self.form_factor.dE/2.0)
             self.Ei_array = torch.floor(torch.round((self.Earr/nu.eV)*10)).int() #for indexing
 
+            prob_fn_tiled = []
+            for ne in torch.arange(1,21):
+                temp = self.ionization_func(ne)
+                temp = torch.where(torch.isnan(temp),0,temp)
+                prob_fn_tiled.append(temp)
+            prob_fn_tiled = torch.stack(prob_fn_tiled)
+            self.probabilities = prob_fn_tiled
 
             # from scipy.interpolate import RegularGridInterpolator
             # qArr_unit = self.qArr /(nu.eV/nu.c0)
@@ -120,7 +139,7 @@ class DMeRate:
                 qmin = (np.exp(formfactor.shell_data[shell_key]['lnqs'].min())) * nu.eV / nu.c0
 
                 qArr = torch.linspace(qmin,qmax,numqs)
-                lnqi = np.log(qArr / (nu.me *nu.c0 * nu.alphaFS))
+                lnqi = np.log(qArr.cpu() / (nu.me *nu.c0 * nu.alphaFS))
                 ffdata = np.zeros((len(Earr),numqs))
                 for i,k in enumerate(logkArr):
                     ffdata[i,:] = formfactor.shell_data[shell_key]['log10ffsquared_itp']((k,lnqi))
@@ -131,33 +150,10 @@ class DMeRate:
             self.qArrdict = qArrdict
             self.form_factor.ff = ffdata_dict
 
-
-                
-
-
-
-
-
-
-            
-
-
-            
-            
-            
-
-
-
-
-
         else:
             raise ValueError('The form factors for the material you are trying to study have not been calculated.')
         
     
-    def optimize(self,device):
-        self.device = device
-
-        self.DM_Halo.optimize(device)
 
     
 
@@ -191,18 +187,19 @@ class DMeRate:
     def RKProbabilities(self,ne): #using values at 100k
         from numpy import loadtxt
         import torch
-        from scipy.interpolate import interp1d
+        # from scipy.interpolate import interp1d
+        from torchinterp1d import interp1d
         import os
         filepath = os.path.join(self.module_dir,'p100k.dat')
         p100data = loadtxt(filepath)
-        pEV = p100data[:,0] *nu.eV
-        file_probabilities = p100data.T#[:,:]
+        pEV = torch.tensor(p100data[:,0]) *nu.eV
+        file_probabilities = torch.tensor(p100data.T)#[:,:]
         file_probabilities = file_probabilities[ne]
 
-        p100_func = interp1d(pEV, file_probabilities, kind = 'linear',bounds_error=False,fill_value=0)
-        probabilities = p100_func(self.Earr.cpu())
-        probabilities = torch.from_numpy(probabilities)
-        probabilities = probabilities.to(self.device)
+        probabilities = interp1d(pEV, file_probabilities,self.Earr).flatten()# kind = 'linear',bounds_error=False,fill_value=0)
+        # probabilities = p100_func(self.Earr)
+        # probabilities = torch.from_numpy(probabilities)
+        # probabilities = probabilities.to(self.device)
         return probabilities
 
     def update_crosssection(self,crosssection):
@@ -226,202 +223,7 @@ class DMeRate:
     #     EE_tiled = torch.tile(E,(len(q),1)).T
     #     vmins = ((EE_tiled/q_tiled)+(q_tiled/(2*mX)))
     #     return  vmins
-    
-    
-    
-    def get_modulated_halo_data(self,vMins,mX,FDMn,halo_model,isoangle,useVerne,calcErrors=None):
-        from scipy.interpolate import CubicSpline, PchipInterpolator, Akima1DInterpolator,PchipInterpolator,interp1d 
 
-        import torch
-        import re
-        import os
-
-        mass_string = mX / (nu.MeV / nu.c0**2) #turn into MeV
-        mass_string = float(mass_string)
-        from numpy import round as npround
-        mass_string = npround(mass_string,3)
-        if isoangle is None:
-            if mass_string.is_integer():
-                mass_string = int(mass_string)
-            else:
-                mass_string = str(mass_string)
-                mass_string = mass_string.replace('.',"_")
-
-        else:
-            mass_string = str(mass_string)
-            mass_string = mass_string.replace('.',"_")
-        sigmaE = float(format(self.cross_section / nu.cm**2, '.3g'))
-        sigmaE_str = str(sigmaE)
-        # sigmaE_str.replace('.',"_")
-        if FDMn == 0:
-                fdm_str = 'Scr'
-        else:
-            fdm_str = 'LM'
-
-        halo_prefix = '../halo_data/modulated/'
-
-        halo_dir_prefix = os.path.join(self.module_dir,halo_prefix) 
-        if useVerne:
-            dir = halo_dir_prefix + f'Verne_{fdm_str}/'
-        elif halo_model =='winter':
-            #note that these only work for mX = 0.6 and sigmaE = 2.1182*10^-31
-            dir = halo_dir_prefix + f'December_mX_0_6_sigma_1e-30_{fdm_str}/'
-        elif halo_model =='summer':
-            dir = halo_dir_prefix + f'June_mX_0_6_sigma_1e-30_{fdm_str}/'
-        else:
-            dir = halo_dir_prefix + f'Parameter_Scan_{fdm_str}/'
-        
-        if 'summer' in halo_model or 'winter' in halo_model: 
-            file = f'{dir}DM_Eta_theta_{isoangle}.txt'
-            
-        else:
-            file = f'{dir}mDM_{mass_string}_MeV_sigmaE_{sigmaE_str}_cm2/DM_Eta_theta_{isoangle}.txt'
-        
-        # print(f"Using Halo Data from: {file}")
-        if not os.path.isfile(file):
-            print(file)
-            raise FileNotFoundError('sigmaE file not found')
-        
-        from numpy import loadtxt
-        try:
-            data = loadtxt(file,delimiter='\t')
-        except ValueError:
-            print(file)
-            raise ValueError(f'file not found! tried {file}')
-        if len(data) == 0:
-            raise ValueError('file is empty!')
-        
-        file_etas = data[:,1] * nu.s / nu.km
-        file_vmins = data[:,0]* nu.km / nu.s
-        if isoangle is not None:
-            if calcErrors is not None:
-                file_eta_err = data[:,2]* nu.s / nu.km
-                if calcErrors == 'High':
-                    file_etas += file_eta_err
-                if calcErrors == 'Low':
-                    file_etas -= file_eta_err
-
-
-        #clearly this was hardcoded to catch something but don't remember what
-        if file_etas[-1] == file_etas[-2]:
-            file_etas = file_etas[:-1]
-            file_vmins = file_vmins[:-1]
-        eta_func = PchipInterpolator(file_vmins,file_etas)
-        # eta_func = interp1d(file_vmins,file_etas,fill_value=0,bounds_error=False)
-
-
-        vMin_numpy = vMins.cpu().numpy()
-        etas = eta_func(vMin_numpy) # inverse velocity
-        etas = torch.from_numpy(etas)
-        if self.device == 'mps':
-            etas = etas.float()
-        etas = etas.to(self.device)
-        # etas*=eta_conversion_factor #s/cm
-        # etas*=ccms**2*sec2yr*self.rhoX/mX * self.cross_section#year^-1
-
-
-        #make sure to avoid interpolation issues where there isn't data
-        etas = torch.where((vMins<file_vmins[0]) | (vMins > file_vmins[-1]) | (torch.isnan(etas)) ,0,etas)
-
-        
-        return etas #inverse velocity
-
-
-
-    def get_halo_from_file(self,vMins,halo_model):
-        from scipy.interpolate import CubicSpline, PchipInterpolator, Akima1DInterpolator,PchipInterpolator,interp1d 
-        import torch
-        import os
-        from numpy import round
-
-        lightSpeed_kmpers = nu.s / nu.km #inverse to output it in units i want
-
-        geVconversion = 1 / (nu.GeV / nu.c0**2/ nu.cm**3)
-        halo_prefix = '../halo_data/'
-
-        halo_dir_prefix = os.path.join(self.module_dir,halo_prefix) 
-        file = halo_dir_prefix + f'{halo_model}_v0{round(self.v0*lightSpeed_kmpers,1)}_vE{round(self.vEarth*lightSpeed_kmpers,1)}_vEsc{round(self.vEscape*lightSpeed_kmpers,1)}_rhoX{round(self.rhoX*geVconversion,1)}.txt'
-        try:
-
-            temp =open(file,'r')
-            temp.close()
-        except FileNotFoundError:
-            self.DM_Halo.generate_halo_files(halo_model)
-        # print(f'found halo file: {file}')
-        from numpy import loadtxt
-        try:
-            data = loadtxt(file,delimiter='\t')
-        except ValueError:
-            try:
-                self.DM_Halo.generate_halo_files(halo_model)
-            except:
-                raise ValueError("Unknown halo type")
-            data = loadtxt(file,delimiter='\t')
-            
-        if len(data) == 0:
-            raise ValueError('file is empty!')
-        
-        #default file units
-        file_etas = data[:,1] * nu.s / nu.km
-        file_vmins = data[:,0]* nu.km / nu.s
-        
-
-        #clearly this was hardcoded to catch something but don't remember what
-        if file_etas[-1] == file_etas[-2]:
-            file_etas = file_etas[:-1]
-            file_vmins = file_vmins[:-1]
-        eta_func = PchipInterpolator(file_vmins,file_etas)
-        # eta_func = interp1d(file_vmins,file_etas,fill_value=0,bounds_error=False)
-
-        vMin_numpy = vMins.cpu().numpy()
-        etas = eta_func(vMin_numpy) # inverse velocity
-        etas = torch.from_numpy(etas)
-        if self.device == 'mps':
-            etas = etas.float()
-        etas = etas.to(self.device)
-        # etas*=eta_conversion_factor #s/cm
-        # etas*=ccms**2*sec2yr*self.rhoX/mX * self.cross_section#year^-1
-
-
-        #make sure to avoid interpolation issues where there isn't data
-        etas = torch.where((vMins<file_vmins[0]) | (vMins > file_vmins[-1]) | (torch.isnan(etas)) ,0,etas)
-
-        
-        return etas #inverse velocity
-
-    def get_halo_data(self,vMins,mX,FDMn,halo_model,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None):
-        import torch
-        import os
-        import re
-        #Etas are very sensitive to numerical deviations, so leaving these units in units of c
-        
-
-
-        if halo_id_params is not None: #doing halo idp analysis
-
-            # vMins = self.DM_Halo.vmin_tensor(self.Earr,qArr,mX)#in velocity units
-            etas = self.DM_Halo.step_function_eta(vMins, halo_id_params) 
-
-
-
-        if isoangle is not None:
-            etas = self.get_modulated_halo_data(vMins,mX,FDMn,halo_model,isoangle,useVerne,calcErrors=calcErrors)
-
-            
-
-
-        elif halo_model == 'imb':
-            # vMins = self.DM_Halo.vmin_tensor(self.Earr,qArr,mX) #in velocity units
-            etas = self.DM_Halo.eta_MB_tensor(vMins) 
-
-        
-        else:
-            etas = self.get_halo_from_file(vMins,halo_model)
-           
-        return etas  #inverse velocity units
-
-    
-    
     def read_output(self,fileName):
         """Read Input File"""
         return form_factor(fileName)
@@ -430,7 +232,15 @@ class DMeRate:
         return mass1*mass2/(mass1+mass2)
     
     def change_to_step(self):
+        import torch
         self.ionization_func = self.step_probabilities
+        prob_fn_tiled = []
+        for ne in torch.arange(1,21):
+            temp = self.ionization_func(ne)
+            temp = torch.where(torch.isnan(temp),0,temp)
+            prob_fn_tiled.append(temp)
+        prob_fn_tiled = torch.stack(prob_fn_tiled)
+        self.probabilities = prob_fn_tiled
     
 
     def TFscreening(self,DoScreen):
@@ -495,6 +305,155 @@ class DMeRate:
         else:
             result = 1.
         return result
+    
+    
+
+    def setup_halo_data(self,mX,FDMn,halo_model,isoangle=None,useVerne=False,calcErrors=None):
+        import os
+        import torch
+        if halo_model == 'imb' or halo_model == 'step':
+            return
+        if isoangle is None:
+            lightSpeed_kmpers = nu.s / nu.km #inverse to output it in units i want
+
+            geVconversion = 1 / (nu.GeV / nu.c0**2/ nu.cm**3)
+            halo_prefix = '../halo_data/'
+
+            halo_dir_prefix = os.path.join(self.module_dir,halo_prefix) 
+            file = halo_dir_prefix + f'{halo_model}_v0{round(self.v0*lightSpeed_kmpers,1)}_vE{round(self.vEarth*lightSpeed_kmpers,1)}_vEsc{round(self.vEscape*lightSpeed_kmpers,1)}_rhoX{round(self.rhoX*geVconversion,1)}.txt'
+            try:
+
+                temp =open(file,'r')
+                temp.close()
+            except FileNotFoundError:
+                self.DM_Halo.generate_halo_files(halo_model)
+            # print(f'found halo file: {file}')
+            from numpy import loadtxt
+            try:
+                data = loadtxt(file,delimiter='\t')
+            except ValueError:
+                try:
+                    self.DM_Halo.generate_halo_files(halo_model)
+                except:
+                    raise ValueError("Unknown halo type")
+                data = loadtxt(file,delimiter='\t')
+                
+            if len(data) == 0:
+                raise ValueError('file is empty!')
+            
+            #default file units
+            file_etas = torch.tensor(data[:,1]) * nu.s / nu.km
+            file_vmins = torch.tensor(data[:,0]) * nu.km / nu.s
+
+            #clearly this was hardcoded to catch something but don't remember what
+            if file_etas[-1] == file_etas[-2]:
+                file_etas = file_etas[:-1]
+                file_vmins = file_vmins[:-1]
+        else:
+            import re
+            import os
+
+            # mass_string = mX / (nu.MeV / nu.c0**2) #turn into MeV
+            mass_string = float(mX)
+            from numpy import round as npround
+            mass_string = npround(mass_string,3)
+
+            mass_string = str(mass_string)
+            mass_string = mass_string.replace('.',"_")
+            sigmaE = float(format(self.cross_section / nu.cm**2, '.3g'))
+            sigmaE_str = str(sigmaE)
+            # sigmaE_str.replace('.',"_")
+            if FDMn == 0:
+                    fdm_str = 'Scr'
+            else:
+                fdm_str = 'LM'
+
+            halo_prefix = '../halo_data/modulated/'
+
+            halo_dir_prefix = os.path.join(self.module_dir,halo_prefix) 
+            if useVerne:
+                dir = halo_dir_prefix + f'Verne_{fdm_str}/'
+            elif halo_model =='winter':
+                #note that these only work for mX = 0.6 and sigmaE = 2.1182*10^-31
+                dir = halo_dir_prefix + f'December_mX_0_6_sigma_1e-30_{fdm_str}/'
+            elif halo_model =='summer':
+                dir = halo_dir_prefix + f'June_mX_0_6_sigma_1e-30_{fdm_str}/'
+            else:
+                dir = halo_dir_prefix + f'Parameter_Scan_{fdm_str}/'
+            
+            if 'summer' in halo_model or 'winter' in halo_model: 
+                file = f'{dir}DM_Eta_theta_{isoangle}.txt'
+                
+            else:
+                file = f'{dir}mDM_{mass_string}_MeV_sigmaE_{sigmaE_str}_cm2/DM_Eta_theta_{isoangle}.txt'
+            
+            # print(f"Using Halo Data from: {file}")
+            if not os.path.isfile(file):
+                print(file)
+                raise FileNotFoundError('sigmaE file not found')
+            
+            from numpy import loadtxt
+            try:
+                data = loadtxt(file,delimiter='\t')
+            except ValueError:
+                print(file)
+                raise ValueError(f'file not found! tried {file}')
+            if len(data) == 0:
+                raise ValueError('file is empty!')
+            
+            file_etas = torch.tensor(data[:,1]) * nu.s / nu.km
+            file_vmins = torch.tensor(data[:,0])* nu.km / nu.s
+            if isoangle is not None:
+                if calcErrors is not None:
+                    file_eta_err = torch.tensor(data[:,2]) * nu.s / nu.km
+                    if calcErrors == 'High':
+                        file_etas += file_eta_err
+                    if calcErrors == 'Low':
+                        file_etas -= file_eta_err
+
+
+            #this was hardcoded to catch duplicates at end of verne file randomly
+            if file_etas[-1] == file_etas[-2]:
+                file_etas = file_etas[:-1]
+                file_vmins = file_vmins[:-1]
+
+        self.file_etas = file_etas
+        self.file_vmins = file_vmins
+        return
+
+
+    def get_halo_data(self,vMins,halo_model,halo_id_params=None):
+        import torch
+        import os
+        import re
+        #Etas are very sensitive to numerical deviations, so leaving these units in units of c
+        
+
+
+        if halo_id_params is not None: #doing halo idp analysis
+            etas = self.DM_Halo.step_function_eta(vMins, halo_id_params) 
+
+
+        elif halo_model == 'imb':
+            # vMins = self.DM_Halo.vmin_tensor(self.Earr,qArr,mX) #in velocity units
+            etas = self.DM_Halo.eta_MB_tensor(vMins) 
+
+        
+        else: #from file
+            from torchinterp1d import interp1d
+            import torch
+            file_vmins = self.file_vmins
+            file_etas = self.file_etas
+ 
+            etas = interp1d(file_vmins,file_etas,vMins) # inverse velocity
+            #make sure to avoid interpolation issues where there isn't data
+            etas = torch.where((vMins<file_vmins[0]) | (vMins > file_vmins[-1]) | (torch.isnan(etas)) ,0,etas)
+            
+        return etas  #inverse velocity units
+
+    
+    
+
         
 
     def vMin_tensor(self,qArr,Earr,mX,shell_key=None):
@@ -523,18 +482,22 @@ class DMeRate:
 
             #  qtest/(2.0*test_mX * nu.MeV) + test_Ee/qtest
         
-    def get_parametrized_eta(self,vMins,mX,FDMn,halo_model,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None):
+    def get_parametrized_eta(self,vMins,mX,halo_model,halo_id_params=None):
         #stupid way for me to set units 
         import torch
 
-        etas = self.get_halo_data(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors) #inverse velocity
+        etas = self.get_halo_data(vMins,halo_model,halo_id_params=halo_id_params) #inverse velocity
         #ccms**2*sec2yr
         etas*=self.rhoX/mX * self.cross_section * nu.c0**2
         etas = etas.to(torch.double)
         return etas # inverse time
 
 
-    def vectorized_dRdE(self,mX,FDMn,halo_model,DoScreen=True,isoangle=None,halo_id_params=None,integrate=True,useVerne=False,calcErrors=None,debug=False,unitize=False):
+
+
+
+
+    def vectorized_dRdE(self,mX,FDMn,halo_model,DoScreen=True,halo_id_params=None,integrate=True,debug=False,unitize=False):
         import torch
 
         mX = mX*nu.MeV  / nu.c0**2
@@ -545,7 +508,7 @@ class DMeRate:
 
         if integrate:
             import torchquad
-            torchquad.set_log_level('ERROR')
+            torchquad.set_log_level('WARNING')
             from torchquad import set_up_backend
             # Enable GPU support if available and set the floating point precision
             set_up_backend("torch", data_type="float64")
@@ -568,7 +531,7 @@ class DMeRate:
                 v = term1 + term2
                 return  v
             def eta_func(vMin):
-                return self.get_parametrized_eta(vMin,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+                return self.get_parametrized_eta(vMin,mX,halo_model,halo_id_params=halo_id_params)
             
             def momentum_integrand(q):
                 q = q.flatten()
@@ -591,7 +554,7 @@ class DMeRate:
         else:
             fdm_factor = (self.FDM(self.qArr,FDMn))**2 #unitless
             vMins = self.vMin_tensor(self.qArr,self.Earr,mX)
-            etas = self.get_parametrized_eta(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+            etas = self.get_parametrized_eta(vMins,mX,halo_model,halo_id_params=halo_id_params)
             if self.QEDark:
                 ff_arr = ff_arr[:,self.Ei_array-1]
             ff_arr = ff_arr.T
@@ -618,7 +581,7 @@ class DMeRate:
         if debug:  
             if integrate:
                 vMins = self.vMin_tensor(self.qArr,self.Earr,mX)
-                etas = self.get_parametrized_eta(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+                etas = self.get_parametrized_eta(vMins,mX,halo_model,halo_id_params=halo_id_params)
                 tf_factor = (self.TFscreening(DoScreen)**2) #unitless
                 fdm_factor = (self.FDM(self.qArr,FDMn))**2 #unitless
                 ff_arr = ff_arr.T
@@ -667,12 +630,7 @@ class DMeRate:
         #assume mX_array in MeV
 
 
-        prob_fn_tiled = []
-        for ne in nes:
-            temp = self.ionization_func(ne)
-            temp = torch.where(torch.isnan(temp),0,temp)
-            prob_fn_tiled.append(temp)
-        prob_fn_tiled = torch.stack(prob_fn_tiled)
+        prob_fn_tiled = self.probabilities[nes-1,:]
 
 
 
@@ -693,26 +651,8 @@ class DMeRate:
         dRdnEs = torch.zeros((len(mX_array),len(nes)))
 
         for m,mX in enumerate(mX_array):
-            if debug:
-                print('mX')
-                print(mX)
-                print('FDMn')
-                print(FDMn)
-                print('halo_model')
-                print(halo_model)
-                print('DoScreen')
-                print(DoScreen)
-                print('isoangle')
-                print(isoangle)
-                print('halo_id_params')
-                print(halo_id_params)
-                print('integrate')
-                print(integrate)
-                print('useVerne')
-                print(useVerne)
-                print('calcErrors')
-                print(calcErrors)
-            dRdE = self.vectorized_dRdE(mX,FDMn,halo_model,DoScreen=DoScreen,isoangle=isoangle,halo_id_params=halo_id_params,integrate=integrate,useVerne=useVerne,calcErrors=calcErrors) #this is in 1 /kg/year/eV , but units are still implicit
+            self.setup_halo_data(mX,FDMn,halo_model,isoangle=isoangle,useVerne=useVerne,calcErrors=calcErrors)
+            dRdE = self.vectorized_dRdE(mX,FDMn,halo_model,DoScreen=DoScreen,halo_id_params=halo_id_params,integrate=integrate) #this is in 1 /kg/year/eV , but units are still implicit
 
 
             if integrate:
@@ -730,7 +670,7 @@ class DMeRate:
             return dRdnEs.T,dRdE,prob_fn_tiled
         return dRdnEs.T #should be in kg/year
     
-    def rate_dme_shell(self,mX,FDMn,halo_model,shell_key,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,unitize=False):
+    def rate_dme_shell(self,mX,FDMn,halo_model,shell_key,halo_id_params=None,debug=False,unitize=False):
         import torch
         qArr = self.qArrdict[shell_key]
         # qiArr = self.qArrdict[shell_key] / (me_eV * nu.alphaFS)
@@ -752,7 +692,7 @@ class DMeRate:
         #eb = get_binding_es(shell_key)
         fdm_factor = (self.FDM(qArr,FDMn))**2 #unitless
         vMins = self.vMin_tensor(qArr,self.Earr,mX,shell_key)
-        etas = self.get_parametrized_eta(vMins,mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors)
+        etas = self.get_parametrized_eta(vMins,mX,halo_model,halo_id_params=halo_id_params)
             
         try:
             ff_arr = self.form_factor.ff[shell_key]
@@ -768,7 +708,7 @@ class DMeRate:
 
 
         import torchquad
-        torchquad.set_log_level('ERROR')
+        torchquad.set_log_level('WARNING')
         from torchquad import set_up_backend
         # Enable GPU support if available and set the floating point precision
         set_up_backend("torch", data_type="float64")
@@ -797,18 +737,18 @@ class DMeRate:
             return integrated_result,prefactor,fdm_factor,ff_arr,etas,qArr,qmin,qmax
         return integrated_result
     
-    def noble_dRdE(self,mX,FDMn,halo_model,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,unitize=False):
+    def noble_dRdE(self,mX,FDMn,halo_model,halo_id_params=None,debug=False,unitize=False):
         mX = mX*nu.MeV / nu.c0**2
         drs = dict()
         for key in self.form_factor.keys:
             if key in skip_keys[self.material]:
                 continue
-            dr = self.rate_dme_shell(mX,FDMn,halo_model,key,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors,debug=False,unitize=unitize)
+            dr = self.rate_dme_shell(mX,FDMn,halo_model,key,halo_id_params=halo_id_params,debug=False,unitize=unitize)
             drs[key] = dr
         return drs
     
 
-    def vectorized_energy_to_ne_pmf(self,rates,shell,nes_tensor,p_primary,p_secondary):
+    def energy_to_ne_pmf(self,rates,shell,nes_tensor,p_primary,p_secondary):
         import torch
         from torch.distributions.binomial import Binomial
         nes_tensor = nes_tensor.to(torch.double)
@@ -865,6 +805,61 @@ class DMeRate:
     
         # print(weights.type(),pmf.type())
         r_n_tensor = torch.matmul(weights, pmf)
+        return r_n_tensor
+
+    def vectorized_energy_to_ne_pmf(self, rates, shell, nes_tensor, p_primary, p_secondary):
+        import torch
+        
+        # Convert inputs to appropriate types
+        nes_tensor = nes_tensor.to(torch.double)
+        p_primary = torch.tensor(p_primary, dtype=torch.double)
+        p_secondary = torch.tensor(p_secondary, dtype=torch.double)
+        fact = additional_quanta[self.material][shell]
+        W = work_function[self.material]
+
+        # Calculate n_secondary (shape: [N])
+        n_secondary = (torch.floor(self.Earr / W) + fact).int()
+        
+        # Calculate binsizes and weights (shape: [N])
+        binsizes = torch.tensor(torch.diff(self.Earr).tolist() + [self.Earr[-1] - self.Earr[-2]])
+        weights = rates.to(torch.float32) * binsizes
+        weights = weights.to(torch.double)
+
+        # Prepare for vectorized calculations
+        N = n_secondary.shape[0]
+        M = nes_tensor.shape[0]
+        
+        # Expand dimensions for broadcasting
+        # nes_tensor: [M] -> [1, M]
+        # n_secondary: [N] -> [N, 1]
+        k = nes_tensor.unsqueeze(0)          # [1, M]
+        n = n_secondary.unsqueeze(1)         # [N, 1]
+        p = p_secondary
+        
+        # Calculate log binomial coefficients using log factorial
+        # log_comb(n,k) = lgamma(n+1) - lgamma(k+1) - lgamma(n-k+1)
+        log_comb = (torch.lgamma(n+1) - torch.lgamma(k+1) - torch.lgamma(n-k+1))
+        
+        # Calculate log probabilities
+        log_pmf = log_comb + k*torch.log(p) + (n-k)*torch.log(1-p)
+        
+        # Calculate pmf_n (set to 0 where k > n)
+        pmf_n = torch.exp(log_pmf) * (k <= n).double()
+        
+        # Calculate pmf_n_minus_1 (for k-1)
+        k_minus_1 = k - 1
+        valid_shift = (k_minus_1 >= 0) & (k_minus_1 <= n)
+        log_comb_shift = (torch.lgamma(n+1) - torch.lgamma(k_minus_1+1) - 
+                        torch.lgamma(n-k_minus_1+1))
+        log_pmf_shift = log_comb_shift + k_minus_1*torch.log(p) + (n-k_minus_1)*torch.log(1-p)
+        pmf_n_minus_1 = torch.exp(log_pmf_shift) * valid_shift.double()
+        
+        # Combine PMFs
+        weighted_pmf = p_primary * pmf_n_minus_1 + (1 - p_primary) * pmf_n
+        
+        # Compute final result
+        r_n_tensor = torch.matmul(weights, weighted_pmf)
+    
         return r_n_tensor
 
     
@@ -954,8 +949,8 @@ class DMeRate:
 
         
         for m,mX in enumerate(mX_array):
-
-            drs = self.noble_dRdE(mX,FDMn,halo_model,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors,debug=False,unitize=False)
+            self.setup_halo_data(mX,FDMn,halo_model,isoangle=isoangle,useVerne=useVerne,calcErrors=calcErrors)
+            drs = self.noble_dRdE(mX,FDMn,halo_model,halo_id_params=halo_id_params,debug=False,unitize=False)
             dRdnEs_by_shell =  self.rates_to_ne(drs,nes,p_primary = 1,p_secondary = 0.83, swap_4s4p = True)
             dRdnEs_by_shell = torch.stack(list(dRdnEs_by_shell.values()))
             dRdnE_sum = torch.sum(dRdnEs_by_shell,axis=0)

@@ -1,16 +1,17 @@
 import numericalunits as nu
 
-def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,useQCDark=True,DoScreen = True,verbose = False,flat=False):
+def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,useQCDark=True,DoScreen = True,verbose = False,flat=False,dmRateObject = None):
     import os
-    import numpy as np
+    import torch
     import sys
     sys.path.append('..')
-    import DMeRates
-    import DMeRates.DMeRate as DMeRate
 
-
-
-    dmrates = DMeRate.DMeRate(material,QEDark= not useQCDark)
+    if dmRateObject is not None:
+        dmrates = dmRateObject
+    else:
+        import DMeRates
+        import DMeRates.DMeRate as DMeRate
+        dmrates = DMeRate.DMeRate(material,QEDark= not useQCDark)
 
     if useQCDark:
         integrate = True
@@ -29,7 +30,8 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
     mass_str = str(mX).replace('.','_')
     loc_dir = f'../halo_data/modulated/{calc_str}_{fdm_str}/mDM_{mass_str}_MeV_sigmaE_{sigmaE}_cm2/'
 
-
+    if type(ne) == int:
+        ne = [ne]
     # else:
     #     loc_dir = f'./halo_data/modulated/Parameter_Scan_{fdm_str}/mDM_{mass_str}_MeV_sigmaE_{sigmaE}_cm2/'
 
@@ -41,17 +43,16 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
         
         # isoangles = np.arange(num_angles) * (180 / num_angles)
         # if useVerne:
-        isoangles = np.linspace(0,180,num_angles)
+        isoangles = torch.linspace(0,180,num_angles)
         if verbose:
             print(f'data is generated, num_angles = {num_angles}')
-        rate_per_angle = []
+        rate_per_angle = torch.zeros((num_angles,len(ne)))
         for isoangle in range(0,num_angles,1):
             try:
                 if flat:
-                    result = dmrates.calculate_rates(mX,'shm',fdm,ne,integrate=integrate,DoScreen=DoScreen,isoangle=None,useVerne=useVerne,calcErrors=calcError) 
+                    result = dmrates.calculate_rates(mX,'shm',fdm,ne,integrate=integrate,DoScreen=DoScreen,isoangle=None,useVerne=useVerne,calcErrors=calcError).flatten()
                 else:
-                    print(f"dmrates.calculate_rates({mX},{halo_model},{fdm},{ne},integrate={integrate},DoScreen={DoScreen},isoangle={isoangle},useVerne={useVerne},calcErrors={calcError}) ")
-                    result = dmrates.calculate_rates(mX,halo_model,fdm,ne,integrate=integrate,DoScreen=DoScreen,isoangle=isoangle,useVerne=useVerne,calcErrors=calcError) 
+                    result = dmrates.calculate_rates(mX,halo_model,fdm,ne,integrate=integrate,DoScreen=DoScreen,isoangle=isoangle,useVerne=useVerne,calcErrors=calcError).flatten()
                 # if kgday:
                 #     result*= nu.kg *nu.day
                 # else:
@@ -60,11 +61,9 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
             
             except ValueError:
                 continue
-            result = float(result)
 
-            rate_per_angle.append(result)
+            rate_per_angle[isoangle,:]= result
 
-        rate_per_angle = np.array(rate_per_angle)
         return isoangles,rate_per_angle
     else:
         print('data not found')
@@ -79,21 +78,15 @@ def generate_modulated_rates(material,FDMn,useQCDark = True,useVerne=True,calcEr
     import re
     import numpy as np
     import os
-    from tqdm.autonotebook import tqdm
-
     import sys
     sys.path.append('..')
+    from tqdm.autonotebook import tqdm
+    import numericalunits as nu
     import DMeRates
     import DMeRates.DMeRate as DMeRate
-
-
-
     dmrates = DMeRate.DMeRate(material,QEDark= not useQCDark)
 
-    if useQCDark:
-        integrate = True
-    else:
-        integrate = False
+
 
 
     fdm_dict = {0: "Scr", 2: "LM"}    
@@ -157,49 +150,21 @@ def generate_modulated_rates(material,FDMn,useQCDark = True,useVerne=True,calcEr
             continue
         if verbose:
             print(mX,sigmaE,d)
-        dmrates.update_crosssection(sigmaE)
-        rate_per_angle = []
-        isoangle = 1
-        try:
-            result = dmrates.calculate_rates(mX,halo_model,FDMn,nes,integrate=integrate,DoScreen=doScreen,isoangle=isoangle,useVerne=useVerne,calcErrors=calcError) * nu.g *nu.day
-            # result = QE.vectorized_dRdnE(material, mX, nes, FDMn,halo_model,isoangle=isoangle,DoScreen=doScreen,useVerne=useVerne)
-        except FileNotFoundError:
-            print('file not found')
-            continue
-
-        loc_dir = halodir + f'mDM_{mass_str}_MeV_sigmaE_{sigmaE}_cm2/'
 
         
-        if os.path.isdir(loc_dir) and len(os.listdir(loc_dir)) > 0:
-            dir_contents = os.listdir(loc_dir)
-            dir_contents = [i for i in dir_contents if i != '.DS_Store']
-            num_angles = len(dir_contents)
-            
-            # isoangles = np.arange(num_angles) * (180 / num_angles)
-            isoangles = np.linspace(0,180,num_angles)
-            # if useVerne:
-                # isoangles = np.linspace(0,180,num_angles)
-            if verbose:
-                print(f'data is generated, num_angles = {num_angles}')
-            rate_per_angle = np.zeros((len(isoangles),len(nes)))
-            for isoangle in range(0,num_angles,1):
-                try:
-                    result = dmrates.calculate_rates(mX,halo_model,FDMn,nes,integrate=integrate,DoScreen=doScreen,isoangle=isoangle,useVerne=useVerne,calcErrors=calcError) * nu.g *nu.day
-                except ValueError:
-                    continue
-                g_day   = np.array(result.T).astype(float)
-                rate_per_angle[isoangle] = g_day
+        isoangles,rate_per_angle = get_modulated_rates(material,mX,sigmaE,FDMn,nes,useVerne=True,calcError=None,useQCDark=True,DoScreen = True,verbose = False,flat=False, dmRateObject = dmrates)
+        rate_per_angle = rate_per_angle.cpu() * nu.g * nu.day
+        isoangles = isoangles.cpu()
 
-
-
-            if save:
-                combined= np.vstack((isoangles,rate_per_angle.T))
-                combined = combined.T
-                np.savetxt(outfile,combined,delimiter=',')
+        if save:
+            combined= np.vstack((isoangles,rate_per_angle.T))
+            combined = combined.T
+            np.savetxt(outfile,combined,delimiter=',')
                 # with open(outfile,'w') as f:
                 #     print(isoangles,rate_per_angle)
                 #     writer = csv.writer(f,delimiter=',')
                 #     writer.writerows(zip(isoangles,rate_per_angle))
+                
     return
 
 def hyp_tan_ff(theta,a,theta_0,theta_s,ff):
@@ -1111,31 +1076,31 @@ def get_angle_limits(loc,date=[8,8,2024]):
     
     import numpy as np
     from scipy.interpolate import CubicSpline
-    try:
-        from isoangle import ThetaIso,sites,FracDays
-        if loc == 'SNOLAB':
-            loc_key = 'SNO'
-        elif loc == 'Bariloche':
-            loc_key = 'BRC'
-        elif loc == 'Fermilab':
-            loc_key = 'FNAL'
-        else:
-            loc_key = loc
-        nlist1 = [FracDays(np.array(date),np.array([h,0,0])) for h in range(24)]
-        y = [np.rad2deg(ThetaIso(sites[loc_key]['loc'],n)) for n in nlist1]
+    # try:
+    from isoangle import ThetaIso,sites,FracDays
+    if loc == 'SNOLAB':
+        loc_key = 'SNO'
+    elif loc == 'Bariloche':
+        loc_key = 'BRC'
+    elif loc == 'Fermilab':
+        loc_key = 'FNAL'
+    else:
+        loc_key = loc
+    nlist1 = [FracDays(np.array(date),np.array([h,0,0])) for h in range(24)]
+    y = [np.rad2deg(ThetaIso(sites[loc_key]['loc'],n)) for n in nlist1]
 
-        x = [h for h in range(24)]
+    x = [h for h in range(24)]
 
-        xnew = np.linspace(0,24,num=1000)
-        spl = CubicSpline(x,y)
-        ynew = spl(xnew)
-        min_angle = np.min(ynew)
-        max_angle = np.max(ynew)
-    except:
-        #no internet
-        print("no internet access or this site is not defined, just returning snolabish")
-        min_angle = 6
-        max_angle = 89
+    xnew = np.linspace(0,24,num=1000)
+    spl = CubicSpline(x,y)
+    ynew = spl(xnew)
+    min_angle = np.min(ynew)
+    max_angle = np.max(ynew)
+    # except:
+    #     #no internet
+    #     print("no internet access or this site is not defined, just returning snolabish")
+    #     min_angle = 6
+    #     max_angle = 89
     return min_angle,max_angle
 
 
@@ -2247,8 +2212,8 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
                 mass_low = np.min(masses)
                 mass_high = np.max(masses)
             else:
-                mass_low = 0.5
-                mass_high = 1000
+                mass_low = np.min(Masses)
+                mass_high = np.max(Masses)
             cs_low = np.min(CrossSections)
             cs_high = np.max(CrossSections)
             if fdm == 2:
@@ -2681,8 +2646,13 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
         # cbar.ax.set_ylim(1e-6,1e6)
     cbar.ax.tick_params(labelsize=large)
     if savefig:
-       
-        savedir = f'figures/{material}/'
+        mat_str_dict = {
+            'Si': 'Silicon',
+            'Xe': 'Xenon',
+            'Ar': 'Argon',
+        }
+        matstr = mat_str_dict[material]
+        savedir = f'figures/{matstr}'
         plt.savefig(f'{savedir}/Mod_Sensitivity_{material}_CombinedFig_{ne}ebin_fdm{fdm}.jpg')
 
     # plt.tight_layout()
@@ -2770,8 +2740,9 @@ def plotModulationFigure(fdm,fractional=False,plotConstraints=True,useVerne=True
                 mass_low = np.min(masses)
                 mass_high = np.max(masses)
             else:
-                mass_low = 0.6
-                mass_high = 1000
+                mass_low = np.min(Masses)#0.6
+                mass_high = np.max(Masses) #1000
+
 
 
             if fdm == 0:
@@ -2926,6 +2897,7 @@ def plotModulationFigure(fdm,fractional=False,plotConstraints=True,useVerne=True
                 from scipy.interpolate import interp1d
                 constraint_interp = interp1d(x,y,bounds_error=False,fill_value=np.nan)
                 solar_constraint_interp = interp1d(xsol,ysol,bounds_error=False,fill_value=np.nan)
+                print(xlow,xhigh)
                 grid = np.geomspace(xlow,xhigh,50)
                 ylower = []
                 for m in grid:
@@ -3266,9 +3238,15 @@ def plotRateComparison(material,sigmaE,mX_list,fdm,plotVerne=True,savefig=False,
     plt.xticks(np.linspace(0,180,19)[::2])
     if savefig:
         if savedir is None:
-            savedir = f'figures/{material}/'
-            file = f'{material}_Rates_Comparison_FDM{fdm}.pdf'
-            savefile = savedir+file
+             mat_str_dict = {
+            'Si': 'Silicon',
+            'Xe': 'Xenon',
+            'Ar': 'Argon',
+        }
+        matstr = mat_str_dict[material]
+        savedir = f'figures/{matstr}'
+        file = f'{material}_Rates_Comparison_FDM{fdm}.pdf'
+        savefile = savedir+file
         plt.savefig(savefile)
 
     plt.show()
@@ -3486,7 +3464,7 @@ def plotMeanFreePath(FDMn,plotConstraints=True):
     MFP = []
     for s in range(len(sigmaEs)):
         MFP_small = []
-        for m in (len(mX_array)):
+        for m in range(len(mX_array)):
             mX = mX_array[m]*1e-3 #GeV
             sigmaP= sigmaEs[s] * (EDLNU.muXElem(mX,EDLNU.mProton) / EDLNU.muXElem(mX,EDLNU.mElectron))**2
 
