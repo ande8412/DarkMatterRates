@@ -1,0 +1,3 @@
+[submodule "torchinterp1d"]
+	path = torchinterp1d
+	url = https://github.com/ande8412/torchinterp1d.git
