@@ -152,7 +152,7 @@ def generate_modulated_rates(material,FDMn,useQCDark = True,useVerne=True,calcEr
             print(mX,sigmaE,d)
 
         
-        isoangles,rate_per_angle = get_modulated_rates(material,mX,sigmaE,FDMn,nes,useVerne=True,calcError=None,useQCDark=True,DoScreen = True,verbose = False,flat=False, dmRateObject = dmrates)
+        isoangles,rate_per_angle = get_modulated_rates(material,mX,sigmaE,FDMn,nes,useVerne=useVerne,calcError=calcError,useQCDark=useQCDark,DoScreen = doScreen,verbose = verbose,flat=False, dmRateObject = dmrates)
         rate_per_angle = rate_per_angle.cpu() * nu.g * nu.day
         isoangles = isoangles.cpu()
 
@@ -166,6 +166,110 @@ def generate_modulated_rates(material,FDMn,useQCDark = True,useVerne=True,calcEr
                 #     writer.writerows(zip(isoangles,rate_per_angle))
                 
     return
+
+def generate_damascus_rates_with_error(ne,material,FDMn,useQCDark = True,DoScreen=True,overwrite=False,verbose=False,save=True):
+    import csv
+    import re
+    import numpy as np
+    import os
+    import sys
+    sys.path.append('..')
+    from tqdm.autonotebook import tqdm
+    import numericalunits as nu
+    import DMeRates
+    import DMeRates.DMeRate as DMeRate
+    dmrates = DMeRate.DMeRate(material,QEDark= not useQCDark)
+
+
+
+
+    fdm_dict = {0: "Scr", 2: "LM"}    
+
+    scr_dict = {True: "_screened", False: "_unscreened"}  
+
+    qedict = {True: "_qcdark",False: "_qedark"}
+    
+    
+
+    halo_model = 'modulated'
+    scr_str = scr_dict[DoScreen] if material == 'Si' else ""
+    qestr = qedict[useQCDark]
+    if material != 'Si':
+        qestr = ''
+
+    fdm_str = fdm_dict[FDMn]
+
+
+
+    write_dir= f'damascus_modulated_rates_{ne}e{scr_str}{qestr}_{material}'
+    
+    write_dir_fit= f'fitted_damascus_modulated_rates_{ne}e{scr_str}{qestr}_{material}'
+
+
+
+    if not os.path.isdir(write_dir):
+        os.mkdir(write_dir)
+
+    if not os.path.isdir(write_dir_fit):
+        os.mkdir(write_dir_fit)
+
+    module_dir = os.path.dirname(__file__)
+    halodir = os.path.join(module_dir,f'../halo_data/modulated/Parameter_Scan_{fdm_str}/')
+
+
+    directories = os.listdir(halodir)
+
+    for celery in tqdm(range(len(directories))):
+        d = directories[celery]
+        if 'Store' in d:
+            continue
+        mass_str = re.findall('DM_.*_MeV',d)[0][3:-4]
+        mX = mass_str.replace('_','.')
+        mX = float(mX)
+
+        if 'sigmaE' in d:
+            sigmaE = re.findall('E_.*cm',d)[0][2:-3].replace('_','.')
+            sigmaE = float(sigmaE)
+
+        outfile = write_dir+f'/mX_{mass_str}_MeV_sigmaE_{sigmaE}_FDM{FDMn}.csv'
+        outfile_fit = write_dir_fit+f'/mX_{mass_str}_MeV_sigmaE_{sigmaE}_FDM{FDMn}.csv'
+
+        if os.path.isfile(outfile) and not overwrite:
+            if verbose:
+                print(f'this rate is generated, continuing: {outfile}')
+            continue
+        if verbose:
+            print(mX,sigmaE,d)
+
+        
+        isoangles,rate_per_angle = get_modulated_rates(material,mX,sigmaE,FDMn,ne,useVerne=False,calcError=None,useQCDark=useQCDark,DoScreen = DoScreen,verbose = verbose,flat=False, dmRateObject = dmrates)
+        isoangles,rate_per_angle_high = get_modulated_rates(material,mX,sigmaE,FDMn,ne,useVerne=False,calcError='High',useQCDark=useQCDark,DoScreen = DoScreen,verbose = verbose,flat=False, dmRateObject = dmrates)
+        isoangles = isoangles.cpu().numpy()
+        rate_per_angle = rate_per_angle.flatten().cpu().numpy() * nu.g * nu.day
+        rate_per_angle_high = rate_per_angle_high.flatten().cpu().numpy() * nu.g * nu.day
+
+        rate_err = rate_per_angle_high - rate_per_angle
+        angle_grid,fit_vector,parameters,errors = fitted_rates(isoangles,rate_per_angle,rate_err)
+        rate_fit = fit_vector[0]
+
+
+        if save:
+            combined= np.vstack((isoangles,rate_per_angle,rate_err))
+            combined = combined.T
+            np.savetxt(outfile,combined,delimiter=',')
+            combined_fit = np.vstack((angle_grid,rate_fit))
+            combined_fit = combined_fit.T
+            np.savetxt(outfile_fit,combined_fit,delimiter=',')
+
+                # with open(outfile,'w') as f:
+                #     print(isoangles,rate_per_angle)
+                #     writer = csv.writer(f,delimiter=',')
+                #     writer.writerows(zip(isoangles,rate_per_angle))
+                
+    return
+
+
+
 
 def hyp_tan_ff(theta,a,theta_0,theta_s,ff):
         import numpy as np

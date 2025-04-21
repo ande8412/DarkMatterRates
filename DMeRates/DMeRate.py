@@ -30,16 +30,33 @@ class DMeRate:
         self.cross_section = crosssection
         self.material = material
         cuda_available = torch.cuda.is_available()
+        mps_available = torch.backends.mps.is_available()
+
         if cuda_available:
             print("CUDA GPU found, performing calculations on GPU")
+            self.device = 'cuda'
+            self.default_dtype = torch.float64
+            self.dtype_str = 'float64'
+        # elif mps_available:
+        #     print("MPS GPU found, performing calculations on GPU. Setting default dtype to float32.")
+        #     self.device = 'mps'
+        #     self.default_dtype = torch.float32
+        #     self.dtype_str = 'float32'
+            
         else:
-            print("CUDA GPU not found, performing calculations on cpu (if you are doing this on apple silicon you can change your device to mps if you'd like)")
-        self.device = 'cuda' if cuda_available else 'cpu'
+            print("CUDA/MPS GPU not found, performing calculations on cpu (if you are doing this on apple silicon you can change your device to mps if you'd like)")
+            self.device = 'cpu'
+            self.default_dtype = torch.float64
+            self.dtype_str = 'float64'
+
+        
+
         if device is not None:
             print(f"You have manually specified your device to be: {device}. Overriding default")
             self.device=device
 
         torch.set_default_device(self.device)
+        torch.set_default_dtype(self.default_dtype)
         self.DM_Halo = DM_Halo_Distributions(self.v0,self.vEarth,self.vEscape,self.rhoX,self.cross_section)
 
         if material == 'Si' or material == 'Ge':
@@ -64,8 +81,6 @@ class DMeRate:
             self.ionization_func = self.RKProbabilities
 
 
-            
-
 
 
 
@@ -76,15 +91,14 @@ class DMeRate:
             nQ = np.shape(self.form_factor.ff)[0]
             self.nE = nE
             self.nQ = nQ
-            
             if QEDark:
-                self.qiArr = torch.arange(1,nQ+1,device=self.device) #for indexing
-                self.qArr = torch.clone(self.qiArr) * self.form_factor.dq 
-                self.Earr = torch.arange(nE,device=self.device)*self.form_factor.dE 
+                self.qiArr = torch.arange(1,nQ+1) #for indexing
+                self.qArr = torch.clone(self.qiArr) * torch.tensor(self.form_factor.dq)
+                self.Earr = torch.arange(nE)*torch.tensor(self.form_factor.dE )
             else:
-                self.qiArr = torch.arange(nQ,device=self.device) #for indexing
-                self.qArr = (torch.clone(self.qiArr) * self.form_factor.dq + self.form_factor.dq / 2.0)
-                self.Earr = (torch.arange(nE,device=self.device)*self.form_factor.dE + self.form_factor.dE/2.0)
+                self.qiArr = torch.arange(nQ) #for indexing
+                self.qArr = torch.clone(self.qiArr) * torch.tensor(self.form_factor.dq,dtype=torch.get_default_dtype()) + (torch.tensor(self.form_factor.dq,dtype=torch.get_default_dtype()) / torch.tensor(2.))
+                self.Earr = torch.arange(nE)*torch.tensor(self.form_factor.dE,dtype=torch.get_default_dtype()) + (torch.tensor(self.form_factor.dE,dtype=torch.get_default_dtype())/ torch.tensor(2.))
             self.Ei_array = torch.floor(torch.round((self.Earr/nu.eV)*10)).int() #for indexing
 
             prob_fn_tiled = []
@@ -111,7 +125,7 @@ class DMeRate:
             # qGrid = np.linspace(self.qArr.min(),self.qArr.max(),numq) /(nu.eV/nu.c0)
             
             # for i,E in enumerate(Earr_unit):
-            #     ff_interp_tensor[:,i] = torch.tensor(ff_interp((qGrid,E)),device=self.device)
+            #     ff_interp_tensor[:,i] = torch.tensor(ff_interp((qGrid,E)))
 
             # self.ff_interp_tensor = ff_interp_tensor
 
@@ -121,7 +135,7 @@ class DMeRate:
             Earr = np.geomspace(1, 400, 100) * nu.eV
 
             logkArr  = np.log(Earr / ry) / 2
-            self.Earr = torch.tensor(Earr,device=self.device)
+            self.Earr = torch.tensor(Earr)
             form_factor_file = f'../wimprates_mod/data/dme/{material}_dme_ionization_ff.pkl'        
             form_factor_file_filepath = os.path.join(self.module_dir,form_factor_file)
         
@@ -144,7 +158,7 @@ class DMeRate:
                 for i,k in enumerate(logkArr):
                     ffdata[i,:] = formfactor.shell_data[shell_key]['log10ffsquared_itp']((k,lnqi))
                 ffdata = 10**ffdata
-                ffdata_dict[shell_key] = torch.tensor(ffdata,device=self.device)
+                ffdata_dict[shell_key] = torch.tensor(ffdata)
                 qArrdict[shell_key] = qArr.to(self.device)
 
             self.qArrdict = qArrdict
@@ -192,8 +206,9 @@ class DMeRate:
         import os
         filepath = os.path.join(self.module_dir,'p100k.dat')
         p100data = loadtxt(filepath)
-        pEV = torch.tensor(p100data[:,0]) *nu.eV
-        file_probabilities = torch.tensor(p100data.T)#[:,:]
+        pEV = torch.tensor(p100data[:,0],dtype=torch.get_default_dtype()) *nu.eV
+        
+        file_probabilities = torch.tensor(p100data.T,dtype=torch.get_default_dtype())#[:,:]
         file_probabilities = file_probabilities[ne]
 
         probabilities = interp1d(pEV, file_probabilities,self.Earr).flatten()# kind = 'linear',bounds_error=False,fill_value=0)
@@ -311,6 +326,8 @@ class DMeRate:
     def setup_halo_data(self,mX,FDMn,halo_model,isoangle=None,useVerne=False,calcErrors=None):
         import os
         import torch
+        torch.set_default_device(self.device)
+        torch.set_default_dtype(self.default_dtype)
         if halo_model == 'imb' or halo_model == 'step':
             return
         if isoangle is None:
@@ -342,8 +359,8 @@ class DMeRate:
                 raise ValueError('file is empty!')
             
             #default file units
-            file_etas = torch.tensor(data[:,1]) * nu.s / nu.km
-            file_vmins = torch.tensor(data[:,0]) * nu.km / nu.s
+            file_etas = torch.tensor(data[:,1],dtype=torch.get_default_dtype()) * nu.s / nu.km
+            file_vmins = torch.tensor(data[:,0],dtype=torch.get_default_dtype()) * nu.km / nu.s
 
             #clearly this was hardcoded to catch something but don't remember what
             if file_etas[-1] == file_etas[-2]:
@@ -401,8 +418,8 @@ class DMeRate:
             if len(data) == 0:
                 raise ValueError('file is empty!')
             
-            file_etas = torch.tensor(data[:,1]) * nu.s / nu.km
-            file_vmins = torch.tensor(data[:,0])* nu.km / nu.s
+            file_etas = torch.tensor(data[:,1],dtype=self.default_dtype) * nu.s / nu.km
+            file_vmins = torch.tensor(data[:,0],dtype=self.default_dtype)* nu.km / nu.s
             if isoangle is not None:
                 if calcErrors is not None:
                     file_eta_err = torch.tensor(data[:,2]) * nu.s / nu.km
@@ -489,7 +506,7 @@ class DMeRate:
         etas = self.get_halo_data(vMins,halo_model,halo_id_params=halo_id_params) #inverse velocity
         #ccms**2*sec2yr
         etas*=self.rhoX/mX * self.cross_section * nu.c0**2
-        etas = etas.to(torch.double)
+        # etas = etas.to(torch.double)
         return etas # inverse time
 
 
@@ -499,19 +516,23 @@ class DMeRate:
 
     def vectorized_dRdE(self,mX,FDMn,halo_model,DoScreen=True,halo_id_params=None,integrate=True,debug=False,unitize=False):
         import torch
+        
+        torch.set_default_device(self.device)
+        torch.set_default_dtype(self.default_dtype)
 
         mX = mX*nu.MeV  / nu.c0**2
         rm = self.reduced_mass(mX,nu.me)
         prefactor = nu.alphaFS * ((nu.me/rm)**2) * (1 / self.form_factor.mCell)
 
-        ff_arr = torch.tensor(self.form_factor.ff,device=self.device)
+        ff_arr = torch.tensor(self.form_factor.ff,dtype=torch.get_default_dtype())
 
         if integrate:
             import torchquad
-            torchquad.set_log_level('WARNING')
+            torchquad.set_log_level('ERROR')
             from torchquad import set_up_backend
             # Enable GPU support if available and set the floating point precision
-            set_up_backend("torch", data_type="float64")
+            set_up_backend("torch", data_type=self.dtype_str)
+
             from torchquad import Simpson
             simp = Simpson()
             numq = len(self.qArr)
@@ -521,10 +542,7 @@ class DMeRate:
 
             
 
-            # ff_arr = self.ff_interp_tensor
-
-
-            integration_domain = torch.Tensor([[qmin,qmax]])
+            integration_domain = torch.tensor([[qmin,qmax]],dtype=torch.get_default_dtype())
             def vmin(q,E,mX):
                 term1 = term1 = E.unsqueeze(0) / q.unsqueeze(1)
                 term2 = q.unsqueeze(1) / (2 * mX)
@@ -546,6 +564,7 @@ class DMeRate:
                 result = eta * tf_f * ff_f
                 result = torch.einsum("i,ji->ji",self.Earr,result)
                 result = torch.einsum("j,ji->ji",qdenom,result)
+
                 return result
             integrated_result = simp.integrate(momentum_integrand, dim=1, N=numq, integration_domain=integration_domain) / self.Earr
 
@@ -613,15 +632,15 @@ class DMeRate:
         
         if type(ne) != torch.Tensor:
             if type(ne) == int:
-                nes = torch.tensor([ne],device=self.device)
+                nes = torch.tensor([ne])
             elif type(ne) == list:
-                nes = torch.tensor(ne,device=self.device)
+                nes = torch.tensor(ne)
             elif type(ne) == numpy.ndarray:
                 nes = torch.from_numpy(ne)
                 nes = nes.to(self.device)
             else:
                 try:
-                    nes = torch.tensor(ne,device=self.device)
+                    nes = torch.tensor(ne)
                 except:
                     print('unknown data type')
         else:
@@ -636,15 +655,15 @@ class DMeRate:
 
         if type(mX_array) != torch.tensor:
             if type(mX_array) == int or type(mX_array) == float:
-                    mX_array = torch.tensor([mX_array],device=self.device)
+                    mX_array = torch.tensor([mX_array])
             elif type(mX_array) == list:
-                mX_array = torch.tensor(mX_array,device=self.device)
+                mX_array = torch.tensor(mX_array)
             elif type(mX_array) == numpy.ndarray:
                 mX_array = torch.from_numpy(mX_array)
                 mX_array = mX_array.to(self.device)
             else:
                 try:
-                    mX_array = torch.tensor([mX_array],device=self.device)
+                    mX_array = torch.tensor([mX_array])
                 except:
                     print('unknown data type')
 
@@ -708,10 +727,11 @@ class DMeRate:
 
 
         import torchquad
-        torchquad.set_log_level('WARNING')
-        from torchquad import set_up_backend
+        torchquad.set_log_level('ERROR')
+        from torchquad import set_up_backend,set_precision
         # Enable GPU support if available and set the floating point precision
-        set_up_backend("torch", data_type="float64")
+        set_up_backend("torch", data_type=self.dtype_str)
+
         from torchquad import Simpson
         simp = Simpson()
         
@@ -751,8 +771,8 @@ class DMeRate:
     def energy_to_ne_pmf(self,rates,shell,nes_tensor,p_primary,p_secondary):
         import torch
         from torch.distributions.binomial import Binomial
-        nes_tensor = nes_tensor.to(torch.double)
-        p_primary = torch.tensor(p_primary, dtype=torch.double)
+        # nes_tensor = nes_tensor.to(torch.double)
+        p_primary = torch.tensor(p_primary)
         fact = additional_quanta[self.material][shell]
         W = work_function[self.material]
 
@@ -760,16 +780,16 @@ class DMeRate:
 
 
         binsizes = torch.tensor(torch.diff(self.Earr).tolist() + [self.Earr[-1] - self.Earr[-2]])
-        rates = rates.to(torch.float32)
+        # rates = rates.to(torch.float32)
         weights = rates * binsizes
 
         N = n_secondary.shape[0]
         M = nes_tensor.shape[0]
 
-        r_n_tensor = torch.zeros(M, dtype=torch.double)
+        r_n_tensor = torch.zeros(M)
 
         # Initialize PMF matrix
-        pmf = torch.zeros((N, M), dtype=torch.double)
+        pmf = torch.zeros((N, M))
 
         # Get unique values for efficiency
         unique_n, inverse_idx = torch.unique(n_secondary, return_inverse=True)
@@ -801,7 +821,7 @@ class DMeRate:
 
             # Assign weighted PMF to all rows with this n
             pmf[row_mask] = weighted_pmf
-        weights = weights.to(torch.double)
+        # weights = weights.to(torch.double)
     
         # print(weights.type(),pmf.type())
         r_n_tensor = torch.matmul(weights, pmf)
@@ -811,9 +831,9 @@ class DMeRate:
         import torch
         
         # Convert inputs to appropriate types
-        nes_tensor = nes_tensor.to(torch.double)
-        p_primary = torch.tensor(p_primary, dtype=torch.double)
-        p_secondary = torch.tensor(p_secondary, dtype=torch.double)
+        # nes_tensor = nes_tensor.to(torch.double)
+        p_primary = torch.tensor(p_primary)
+        p_secondary = torch.tensor(p_secondary)
         fact = additional_quanta[self.material][shell]
         W = work_function[self.material]
 
@@ -822,8 +842,8 @@ class DMeRate:
         
         # Calculate binsizes and weights (shape: [N])
         binsizes = torch.tensor(torch.diff(self.Earr).tolist() + [self.Earr[-1] - self.Earr[-2]])
-        weights = rates.to(torch.float32) * binsizes
-        weights = weights.to(torch.double)
+        weights = rates * binsizes
+        # weights = weights.to(torch.double)
 
         # Prepare for vectorized calculations
         N = n_secondary.shape[0]
@@ -907,29 +927,29 @@ class DMeRate:
 
         if type(mX_array) != torch.tensor:
             if type(mX_array) == int or type(mX_array) == float:
-                    mX_array = torch.tensor([mX_array],device=self.device)
+                    mX_array = torch.tensor([mX_array])
             elif type(mX_array) == list:
-                mX_array = torch.tensor(mX_array,device=self.device)
+                mX_array = torch.tensor(mX_array)
             elif type(mX_array) == numpy.ndarray:
                 mX_array = torch.from_numpy(mX_array)
                 mX_array = mX_array.to(self.device)
             else:
                 try:
-                    mX_array = torch.tensor([mX_array],device=self.device)
+                    mX_array = torch.tensor([mX_array])
                 except:
                     print('unknown data type')
 
         if type(ne) != torch.Tensor:
             if type(ne) == int:
-                nes = torch.tensor([ne],device=self.device)
+                nes = torch.tensor([ne])
             elif type(ne) == list:
-                nes = torch.tensor(ne,device=self.device)
+                nes = torch.tensor(ne)
             elif type(ne) == numpy.ndarray:
                 nes = torch.from_numpy(ne)
                 nes = nes.to(self.device)
             else:
                 try:
-                    nes = torch.tensor(ne,device=self.device)
+                    nes = torch.tensor(ne)
                 except:
                     print('unknown data type')
         else:
