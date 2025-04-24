@@ -63,7 +63,8 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
                 continue
 
             rate_per_angle[isoangle,:]= result
-
+        isoangles = isoangles.cpu()
+        rate_per_angle = rate_per_angle.cpu()
         return isoangles,rate_per_angle
     else:
         print('data not found')
