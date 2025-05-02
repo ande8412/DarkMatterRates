@@ -1,5 +1,29 @@
 import numericalunits as nu
 
+
+def set_default_plotting_params(fontsize=40):
+
+    import matplotlib
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as tck
+    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
+                                AutoMinorLocator)
+    from matplotlib.offsetbox import AnchoredText
+    #Options
+    params = {'text.usetex' : True,
+            'font.size' : fontsize,
+            'font.family' : 'cmr10',
+            'figure.autolayout': True
+            }
+    plt.rcParams.update(params)
+    plt.rcParams['axes.unicode_minus']=False
+    plt.rcParams['axes.labelsize']=fontsize
+    golden = (1 + 5 ** 0.5) / 2
+    goldenx = 15
+    goldeny = goldenx / golden
+    plt.rcParams['figure.figsize']=(16,12)
+
+
 def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,useQCDark=True,DoScreen = True,verbose = False,flat=False,dmRateObject = None):
     import os
     import torch
@@ -397,33 +421,14 @@ def fitted_rates(angles,rates,rates_err=None,linear=False):
 
 def plot_damascus_output(test_mX,FDMn,cross_section,long=True,savefig=False):
     import os
-    from scipy.interpolate import CubicSpline
-    import torch
     import numpy as np
-    
-    import matplotlib
     import matplotlib.pyplot as plt
-    import matplotlib.ticker as tck
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
-    #Options
-    params = {'text.usetex' : True,
-            'font.size' : 40,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-            }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=40
+    import matplotlib
+    set_default_plotting_params()
+
+
+
     
-
-
-    golden = (1 + 5 ** 0.5) / 2
-    goldenx = 15
-    goldeny = goldenx / golden
-
-    plt.rcParams['figure.figsize']=(16,12)
     plt.figure()
 
     # mediator = "LM"
@@ -614,9 +619,7 @@ def get_damascus_output(mX,sigmaE,FDMn):
 
 def get_raw_damascus_output(dirname,mX,sigmaE,FDMn,rhoX=0.3):
     import os
-    from scipy.interpolate import CubicSpline,Akima1DInterpolator,BarycentricInterpolator,PchipInterpolator
-    import torch
-    import sys
+    from scipy.interpolate import PchipInterpolator
     import sys
     sys.path.append('..')
     import DMeRates
@@ -719,26 +722,13 @@ def getVerneData(mX,sigmaE,FDMn):
 
 def plot_raw_damascus_output(dirname,mX,sigmaE,FDMn,rhoX=0.3,logy=False,save=False):
     import os
-    from scipy.interpolate import CubicSpline,Akima1DInterpolator,BarycentricInterpolator,PchipInterpolator
-    import torch
+    from scipy.interpolate import PchipInterpolator
     import numpy as np
 
 
     import matplotlib
     import matplotlib.pyplot as plt
-    import matplotlib.ticker as tck
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
-    #Options
-    params = {'text.usetex' : True,
-            'font.size' : 12,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-            }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=12
+    set_default_plotting_params(fontsize=12)
     import sys
     sys.path.append('..')
     import DMeRates
@@ -755,7 +745,6 @@ def plot_raw_damascus_output(dirname,mX,sigmaE,FDMn,rhoX=0.3,logy=False,save=Fal
     goldenx = 15
     goldeny = goldenx / golden
 
-    plt.rcParams['figure.figsize']=(6,4)
     plt.figure()
 
     # mediator = "LM"
@@ -877,10 +866,7 @@ def point_checking(mX,sigmaE,FDMn,save=False,skipVerne=False,ne=1,useQCDark=True
     
     import matplotlib
     import matplotlib.pyplot as plt
-    import matplotlib.ticker as tck
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
+
     import numpy as np
     import sys
     sys.path.append('..')
@@ -895,14 +881,7 @@ def point_checking(mX,sigmaE,FDMn,save=False,skipVerne=False,ne=1,useQCDark=True
     medium = 36
     large = 40
 
-    params = {'text.usetex' : True,
-            'font.size' : medium,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-            }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=medium
+    set_default_plotting_params(fontsmall=medium)
     
 
 
@@ -910,7 +889,6 @@ def point_checking(mX,sigmaE,FDMn,save=False,skipVerne=False,ne=1,useQCDark=True
     goldenx = 15
     goldeny = goldenx / golden
 
-    plt.rcParams['figure.figsize']=(16,12)
 
 
     sigmaP = sigmaE_to_sigmaP(sigmaE,mX)
@@ -1145,37 +1123,37 @@ def point_checking(mX,sigmaE,FDMn,save=False,skipVerne=False,ne=1,useQCDark=True
     
 
 
-def eta_SHM(vmins):
-    import numpy as np
-    from scipy.special import erf
-    from QEDarkConstants import lightSpeed
-    eta = np.zeros_like(vmins)
-    vEarth = 250.2e3 #m/s
-    vEscape = 544e3 #m/s
-    v0 = 238e3 #m/s
-    vEarth/=lightSpeed
-    vEscape/=lightSpeed
-    v0/=lightSpeed
+# def eta_SHM(vmins):
+#     import numpy as np
+#     from scipy.special import erf
+#     from QEDarkConstants import lightSpeed
+#     eta = np.zeros_like(vmins)
+#     vEarth = 250.2e3 #m/s
+#     vEscape = 544e3 #m/s
+#     v0 = 238e3 #m/s
+#     vEarth/=lightSpeed
+#     vEscape/=lightSpeed
+#     v0/=lightSpeed
     
 
-    val_below = -4.0*vEarth*np.exp(-(vEscape/v0)**2) + np.sqrt(np.pi)*v0*(erf((vmins+vEarth)/v0) - erf((vmins - vEarth)/v0))
+#     val_below = -4.0*vEarth*np.exp(-(vEscape/v0)**2) + np.sqrt(np.pi)*v0*(erf((vmins+vEarth)/v0) - erf((vmins - vEarth)/v0))
 
-    val_above = -2.0*(vEarth+vEscape-vmins)*np.exp(-(vEscape/v0)**2) + np.sqrt(np.pi)*v0*(erf(vEscape/v0) - erf((vmins - vEarth)/v0))
+#     val_above = -2.0*(vEarth+vEscape-vmins)*np.exp(-(vEscape/v0)**2) + np.sqrt(np.pi)*v0*(erf(vEscape/v0) - erf((vmins - vEarth)/v0))
 
-    above_mask = vmins < vEscape + vEarth
-    eta = np.where(above_mask,val_below,eta)
-    below_mask = vmins < vEscape - vEarth
-    eta = np.where(below_mask,val_below,eta)
+#     above_mask = vmins < vEscape + vEarth
+#     eta = np.where(above_mask,val_below,eta)
+#     below_mask = vmins < vEscape - vEarth
+#     eta = np.where(below_mask,val_below,eta)
     
 
-    K = (v0**3)*(-2.0*np.pi*(vEscape/v0)*np.exp(-(vEscape/v0)**2) + (np.pi**1.5)*erf(vEscape/v0))
+#     K = (v0**3)*(-2.0*np.pi*(vEscape/v0)*np.exp(-(vEscape/v0)**2) + (np.pi**1.5)*erf(vEscape/v0))
 
-    etas = (v0**2)*np.pi/(2.0*vEarth*K)*eta #units of c^-1
-    etas/=lightSpeed #convert to s/m
-    etas*=1e3#convert to s/km
-    #not sure if etas is allowed to be zero.
-    etas[np.where(etas < 0)] = 0
-    return etas
+#     etas = (v0**2)*np.pi/(2.0*vEarth*K)*eta #units of c^-1
+#     etas/=lightSpeed #convert to s/m
+#     etas*=1e3#convert to s/km
+#     #not sure if etas is allowed to be zero.
+#     etas[np.where(etas < 0)] = 0
+#     return etas
 
 
 
@@ -1341,7 +1319,11 @@ def plot_modulation_ne_bins(mX1,mX2,sigmaE1,sigmaE2,material,FDMn,location1='SNO
 
 
     qedict = {True: "_qcdark",False: "_qedark"}
-
+    matnamedict = {
+        'Si': "Silicon",
+        'Xe': "Xenon",
+        'Ar': 'Argon',
+    }
     qestr = qedict[useQCDark]
 
     min_angle_1,max_angle_1 = get_angle_limits(location1)
@@ -1362,33 +1344,19 @@ def plot_modulation_ne_bins(mX1,mX2,sigmaE1,sigmaE2,material,FDMn,location1='SNO
     # plotting specifications
     import matplotlib as mpl
     import matplotlib.pyplot as plt
-    import matplotlib.ticker as tck
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
-    #Options
+
     large = 24
     small = 16
     medium = 20
-    params = {'text.usetex' : True,
-            'font.size' : small,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-            }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=small
-    plt.rcParams['figure.figsize']=(8,8)
-
-    import matplotlib.cm as mplcm
-    import matplotlib.colors as colors
-
+    set_default_plotting_params(fontsize=small)
+    #Options
+    
     cmap = plt.get_cmap("tab10") # default color cycle, call by using color=cmap(i) i=0 is blue
 
     plot_nes = np.arange(1,len(nes) +2)
 
 
-    fig = plt.figure(layout='constrained')
+    fig = plt.figure(layout='constrained',figsize=(8,8))
     ax = plt.gca()
     plt.xlabel("Q")
     
@@ -1457,7 +1425,7 @@ def plot_modulation_ne_bins(mX1,mX2,sigmaE1,sigmaE2,material,FDMn,location1='SNO
         plt.ylim(ybounds[0],ybounds[1])
     
     if save:
-        savedir = f'figures/{material}/'
+        savedir = f'figures/{matnamedict[material]}/'
         if fractional:
             frac_str = 'fractional_'
         else:
@@ -1466,7 +1434,7 @@ def plot_modulation_ne_bins(mX1,mX2,sigmaE1,sigmaE2,material,FDMn,location1='SNO
             verne_str=  'verne'
         else:
             verne_str= 'damascus'
-        name = f'{frac_str}modulation_amp_ne_bins_{location1}_vs_{location2}_FDM{FDMn}_{verne_str}_{qestr}.jpg'
+        name = f'{frac_str}modulation_amp_ne_bins_{location1}_vs_{location2}_FDM{FDMn}_{verne_str}{qestr}.jpg'
         plt.savefig(savedir+name)
     plt.show()
 
@@ -2147,12 +2115,7 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
     import matplotlib.pyplot as plt
     import matplotlib
     from matplotlib import colors
-    from matplotlib import cm, ticker
 
-    # plotting specifications
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
     #Options
 
     large = 48
@@ -2160,21 +2123,13 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
     medium = 40
     smaller = 30
     smallest=16
-    params = {'text.usetex' : True,
-        'font.size' : medium,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-        }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=32
-    plt.rcParams['figure.figsize']=(26,26)
-    plt.rcParams['axes.formatter.use_mathtext']=True
+    set_default_plotting_params(fontsize=medium)
+   
     nrows = 3
     ncols = 2
 
     
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, sharex=False, sharey=False,layout='constrained')
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, sharex=False, sharey=False,layout='constrained',figsize=(26,26))
     ebinstr = f'{ne}' + '$e^-$ bin'
     fdmstr = '$F_{\mathrm{DM}} \propto q^{-2}$' if fdm == 2 else '$F_{\mathrm{DM}} = 1$'
     matdit = {
@@ -2775,12 +2730,7 @@ def plotModulationFigure(fdm,fractional=False,plotConstraints=True,useVerne=True
     import matplotlib.pyplot as plt
     import matplotlib
     from matplotlib import colors
-    from matplotlib import cm, ticker
 
-    # plotting specifications
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
     #Options
 
     large = 48
@@ -2788,19 +2738,20 @@ def plotModulationFigure(fdm,fractional=False,plotConstraints=True,useVerne=True
     medium = 40
     smaller = 30
     smallest=16
-    params = {'text.usetex' : True,
-        'font.size' : medium,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-        }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=32
-    plt.rcParams['figure.figsize']=(26,26)
-    plt.rcParams['axes.formatter.use_mathtext']=True
+    set_default_plotting_params(fontsize=large)
+    # params = {'text.usetex' : True,
+    #     'font.size' : medium,
+    #         'font.family' : 'cmr10',
+    #         'figure.autolayout': True
+    #     }
+    # plt.rcParams.update(params)
+    # plt.rcParams['axes.unicode_minus']=False
+    # plt.rcParams['axes.labelsize']=32
+    # plt.rcParams['figure.figsize']=(26,26)
+    # plt.rcParams['axes.formatter.use_mathtext']=True
     ncols = 2
     nrows = 3
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, sharex=False, sharey=False,layout='constrained')
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, sharex=False, sharey=False,layout='constrained',figsize=(26,26))
     fracstr = "Fractional" if fractional else ""
     fdmstr = '$F_{\mathrm{DM}} \propto q^{-2}$' if fdm == 2 else '$F_{\mathrm{DM}} = 1$'
     ebinstr = f'{ne}' + '$e^-$ bin'
@@ -3169,23 +3120,11 @@ def find_exp(number) -> int:
 def plotRateComparison(material,sigmaE,mX_list,fdm,plotVerne=True,savefig=False,savedir=None,verneOnly=False,damascusOnly=False,ne=1,useQCDark=True):
     import numpy as np
     # plotting specifications
-    import matplotlib as mpl
     import matplotlib.pyplot as plt
-    import matplotlib.ticker as tck
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
+  
     #Options
-    params = {'text.usetex' : True,
-            'font.size' : 40,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-            }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=40
-    plt.rcParams['figure.figsize']=(16,14)
-
+    set_default_plotting_params(fontsize=40)
+   
     import matplotlib.cm as mplcm
     import matplotlib.colors as colors
 
@@ -3193,7 +3132,7 @@ def plotRateComparison(material,sigmaE,mX_list,fdm,plotVerne=True,savefig=False,
     golden = (1 + 5 ** 0.5) / 2
     goldenx = 15
     goldeny = goldenx / golden
-    fig = plt.figure()
+    fig = plt.figure(figsize=(16,14))
 
 
     plt.xlabel('$\Theta$\N{degree sign}')
@@ -3251,8 +3190,12 @@ def plotRateComparison(material,sigmaE,mX_list,fdm,plotVerne=True,savefig=False,
 
         if not verneOnly:
             isoangles,rates = get_modulated_rates(material,mX,sE,fdm,useVerne=False,ne=ne,useQCDark=useQCDark)
+            rates = rates * nu.kg *  nu.day
             isoangles,rates_high = get_modulated_rates(material,mX,sE,fdm,useVerne=False,calcError="High",ne=ne,useQCDark=useQCDark)
+            rates_high = rates_high * nu.kg *  nu.day
             isoangles,rates_low = get_modulated_rates(material,mX,sE,fdm,useVerne=False,calcError="Low",ne=ne,useQCDark=useQCDark)
+            rates_low = rates_low * nu.kg *  nu.day
+
 
 
             if maxv < np.max(rates_high):
@@ -3271,6 +3214,8 @@ def plotRateComparison(material,sigmaE,mX_list,fdm,plotVerne=True,savefig=False,
 
         if not damascusOnly:
             isoangles_v,rates_v = get_modulated_rates(material,mX,sE,fdm,useVerne=True,ne=ne,useQCDark=useQCDark)
+            rates_v = rates_v * nu.kg *  nu.day
+
 
 
             plt.plot(isoangles_v,rates_v,ls='--',color=colorlist[i])
@@ -3367,41 +3312,31 @@ def plotRateComparison(material,sigmaE,mX_list,fdm,plotVerne=True,savefig=False,
 def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,savefig=False,savedir=None,verneOnly=False,damascusOnly=False,ne=1,showScatter=False,showFit=False,useQCDark=True,kgday=True):
     import numpy as np
     # plotting specifications
-    import matplotlib as mpl
     import matplotlib.pyplot as plt
-    import matplotlib.ticker as tck
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
-    #Options
+
     if kgday:
         mass_factor = nu.kg
     else:
         mass_factor = nu.g
     time_factor = nu.day
 
-
+    #Options
     small = 32
     large= 40
     medium = 36
-    params = {'text.usetex' : True,
-            'font.size' : small,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-            }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=small
-    plt.rcParams['figure.figsize']=(16,32)
+    set_default_plotting_params(fontsize=small)
 
-    import matplotlib.cm as mplcm
-    import matplotlib.colors as colors
+    matnamedict = {
+        'Si': "Silicon",
+        'Xe': "Xenon",
+        'Ar': 'Argon',
+    }
 
     cmap = plt.get_cmap("tab10") # default color cycle, call by using color=cmap(i) i=0 is blue
     golden = (1 + 5 ** 0.5) / 2
     goldenx = 15
     goldeny = goldenx / golden
-    fig,axes = plt.subplots(len(mX_list),layout='constrained')
+    fig,axes = plt.subplots(len(mX_list),layout='constrained',figsize=(16,32))
     fig.suptitle(f'{material} {ne}$e^-$ Rate vs Isoangle',fontsize=large)
     # colorlist = ['steelblue','crimson','forestgreen','rebeccapurple']
     for i in range(len(mX_list)):
@@ -3453,8 +3388,14 @@ def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,s
             rates_low *= mass_factor * time_factor
             rates_flat *= mass_factor * time_factor
 
-            current_ax.plot(isoangles,rates_flat,color='green',label="Flat",lw=3)
+            rates = rates.flatten().numpy()
+            rates_low = rates_low.flatten().numpy()
+            rates_high = rates_high.flatten().numpy()
+            rates_flat = rates_flat.flatten().numpy()
+            isoangles = isoangles.flatten().numpy()
 
+
+            current_ax.plot(isoangles,rates_flat,color='green',label="Flat",lw=3)
             maxv = np.max(rates_high)*1.2
             minv = np.min(rates_low)
         
@@ -3489,6 +3430,7 @@ def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,s
         if not damascusOnly:
             isoangles_v,rates_v = get_modulated_rates(material,mX,sigmaE,fdm,useVerne=True,ne=ne,useQCDark=useQCDark)
             rates_v *= mass_factor * time_factor
+            rates_v = rates_v.flatten().numpy()
          
             current_ax.plot(isoangles_v,rates_v,ls='--',label="Verne")
             if np.max(rates_v) > maxv:
@@ -3538,7 +3480,7 @@ def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,s
         current_ax.set_ylim(minv,maxv)
     if savefig:
         if savedir is None:
-            savedir = f'figures/{material}/'
+            savedir = f'figures/{matnamedict[material]}/'
             file = f'{material}_Rates_Comparison_FDM{fdm}_subfigs.pdf'
             savefile = savedir+file
         plt.savefig(savefile)
@@ -3554,6 +3496,8 @@ def plotMeanFreePath(FDMn,plotConstraints=True):
     from tqdm.autonotebook import tqdm
     import sys
     from MeanFreePath import Earth_Density_Layer_NU
+    import matplotlib
+    import matplotlib.ticker as ticker
     # sigmaEs = np.arange(-40,-28,1)
     # sigmaEs = np.arange(-40,-26,(-26 + 40)/1000)
     # sigmaEs = 10**(sigmaEs)
@@ -3583,33 +3527,20 @@ def plotMeanFreePath(FDMn,plotConstraints=True):
 
 
     import matplotlib.pyplot as plt
-    import matplotlib.cm as cm
-    from scipy.interpolate import CubicSpline, PchipInterpolator, Akima1DInterpolator    
     import matplotlib.colors as colors
-    from matplotlib import cm, ticker
-
     import matplotlib
 
     # plotting specifications
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
+
     #Options
 
     smallest = 16
     smaller = 24
     medium = 32
     large = 40
-    params = {'text.usetex' : True,
-            'font.size' : medium,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-            }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=medium
-    plt.rcParams['figure.figsize']=(5,5)
-    plt.rcParams['axes.formatter.use_mathtext']=True
+
+    set_default_plotting_params(fontsize=medium)
+   
 
 
 
@@ -3769,31 +3700,18 @@ def plotLocationExposure(address1,address2,savefig=True):
     import pandas as pd
     import matplotlib.pyplot as plt
     import glob
-    from scipy.optimize import curve_fit
     from astropy.coordinates import EarthLocation, SkyCoord,AltAz
     from astropy.time import Time
     import astropy.units as u
     # plotting specifications
-    import matplotlib as mpl
     import matplotlib.pyplot as plt
-    import matplotlib.ticker as tck
-    from matplotlib.ticker import (MultipleLocator, FormatStrFormatter,
-                                AutoMinorLocator)
-    from matplotlib.offsetbox import AnchoredText
+
     #Options
     small = 16
     large= 24
     medium = 20
-    params = {'text.usetex' : True,
-            'font.size' : small,
-            'font.family' : 'cmr10',
-            'figure.autolayout': True
-            }
-    plt.rcParams.update(params)
-    plt.rcParams['axes.unicode_minus']=False
-    plt.rcParams['axes.labelsize']=small
-    plt.rcParams['figure.figsize']=(16,16)
-
+    set_default_plotting_params(fontsize=small)
+    
     import matplotlib.cm as mplcm
     import matplotlib.colors as colors
 

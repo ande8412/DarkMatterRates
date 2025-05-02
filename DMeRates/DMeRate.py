@@ -1006,7 +1006,7 @@ class DMeRate:
     
     
 
-    def generate_dat(self,dm_masses,ne_bins,fdm,dm_halo_model,DoScreen=False,write=True):
+    def generate_dat(self,dm_masses,ne_bins,fdm,dm_halo_model,DoScreen=False,write=True,tag=""):
         import torch
         from tqdm.autonotebook import tqdm
         import numpy as np
@@ -1040,7 +1040,7 @@ class DMeRate:
 
         
       
-        filename = FDM_Dir + f'FDM{fdm_dict[fdm]}_vesc{vesc_print}-v0{v0_print}-vE{vE_print}-rhoX{rho_X_print}_nevents_func{function_name}_maxne{np.max(ne_bins)}_unscaled{screen}{qestr}_dmerates.dat'
+        filename = FDM_Dir + f'FDM{fdm_dict[fdm]}_vesc{vesc_print}-v0{v0_print}-vE{vE_print}-rhoX{rho_X_print}_nevents_func{function_name}_maxne{np.max(ne_bins)}_unscaled{screen}{qestr}_dmerates_{tag}.dat'
         
         lines = []
         data = np.zeros((len(dm_masses),len(ne_bins)))
