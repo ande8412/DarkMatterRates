@@ -3398,7 +3398,7 @@ def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,s
             isoangles = isoangles.flatten().numpy()
 
 
-            current_ax.plot(isoangles,rates_flat,color='green',label="Flat",lw=3)
+            # current_ax.plot(isoangles,rates_flat,color='green',label="Flat",lw=3)
             maxv = np.max(rates_high)*1.2
             minv = np.min(rates_low)
         
@@ -3772,3 +3772,154 @@ def plotLocationExposure(address1,address2,savefig=True):
 
 
     return
+
+
+def significance(average,fracamp,exposure,background):
+    import numpy as np
+    numerator = average * fracamp * exposure
+    denominator = average + background
+    denominator*= exposure
+    denominator = np.sqrt(denominator)
+    sig = numerator / denominator
+    return sig
+
+
+def find_sigma_cross_section(material,FDMn,test_mX,test_exposure,background,ne=1,loc='SNO',useVerne=True,fromFile=True,useQCDark = True,sigma=5):
+    from scipy.interpolate import Akima1DInterpolator 
+    from tqdm.autonotebook import tqdm
+    import os
+    import re
+    import numericalunits as nu
+    from Modulation import get_amplitude,get_angle_limits
+
+
+    import numpy as np
+    calc_method_dict = {True: "verne", False: "damascus"}   
+
+    qedict = {True: "_qcdark",False: "_qedark"}
+
+    qestr = qedict[useQCDark] if material == 'Si' else ""
+
+    halo_type = calc_method_dict[useVerne]
+    screenstr = '_screened' if material == 'Si' else ""
+    halo_dir = f'./{halo_type}_modulated_rates{screenstr}{qestr}_{material}/'
+    sigmaEs = []
+    file_list = os.listdir(halo_dir)
+    for f in tqdm(range(len(file_list)),desc="Fetching Modulation Data"):
+        file = file_list[f]
+        if 'mX' not in file:
+            continue
+        mass_str = re.findall('mX_.+MeV',file)[0][3:-4]
+        mX = float(mass_str.replace('_','.'))
+
+        sigmaE = re.findall('sigmaE_.+_FD',file)[0][7:-3]
+
+        sigmaE = float(sigmaE)
+        Fdm= int(re.findall('FDM.+.csv',file)[0][3:-4])
+        if Fdm != FDMn:
+            continue
+        sigmaEs.append(sigmaE)
+    sigmaEs = np.array(sigmaEs)
+
+    possible_cs = np.unique(np.sort(sigmaEs))
+    true_cs = []
+    significances = []
+    for cs in possible_cs:
+        try:
+            minangle,maxangle = get_angle_limits(loc)
+            test_amp = get_amplitude(test_mX,cs,FDMn,material,minangle,maxangle,ne=ne,fractional=False,useVerne = useVerne,fromFile=fromFile)
+            test_amp_average = get_amplitude(test_mX,cs,FDMn,material,minangle,maxangle,ne=ne,fractional=False,useVerne = useVerne,fromFile=fromFile,returnaverage=True)
+            test_amp_frac = get_amplitude(test_mX,cs,FDMn,material,minangle,maxangle,ne=ne,fractional=True,useVerne = useVerne,fromFile=fromFile)
+
+            sig = significance(test_amp_average,test_amp_frac,test_exposure,background)
+            significances.append(sig)
+            true_cs.append(cs)
+        except:
+            continue
+    true_cs = np.array(true_cs)
+    significances = np.array(significances)
+
+    significances = significances[np.argsort(true_cs)]
+    true_cs = np.sort(true_cs)
+
+
+    
+
+    # import matplotlib.pyplot as plt
+    # plt.figure()
+    # plt.title(f'mX {test_mX}, FDMn{FDMn}')
+    # plt.xlabel('cross-section')
+    # plt.ylabel("Significance")
+    # plt.xscale('log')
+    # plt.plot(true_cs,significances)
+
+
+    # plt.show()
+    # plt.close()
+    crop_indices = significances < 1000
+    significances_x = significances[crop_indices]
+    cs_y = true_cs[crop_indices]
+
+    sig_interp = Akima1DInterpolator(significances_x,cs_y)
+    # print(significances_x,cs_y)
+    sig5_cs = sig_interp(sigma)
+    return sig5_cs
+
+
+
+
+def plot_silicon_1e_limit_comparison():
+    background_rates = [40,30,20,10,5,1,0.1] #events /g/day
+    import numpy as np
+
+    exp = 1 * nu.kg * nu.day
+    mod_5sigma_limits = []
+    mod_2sigma_limits = []
+
+    for background in background_rates:
+        background_rate = background / nu.g / nu.day
+        lim = find_sigma_cross_section('Si',2,1.,exp,background_rate,ne=1,loc='SNO',useVerne=True,fromFile=True,useQCDark = True)
+        lim1 = find_sigma_cross_section('Si',2,1.,exp,background_rate,ne=1,loc='SNO',useVerne=True,fromFile=True,useQCDark = True,sigma=2)
+        mod_2sigma_limits.append(lim1)
+
+        mod_5sigma_limits.append(lim)
+    mod_5sigma_limits = np.array(mod_5sigma_limits)
+    mod_2sigma_limits = np.array(mod_2sigma_limits)
+
+    #1 MeV Limits as function of background (g-day)
+    import numpy as np
+    direct_cs_limits = np.array([3.8117663084462336e-33,
+    2.8620430180900985e-33,
+    1.91063070599704e-33,
+    9.588648152603455e-34,
+    4.818231923364183e-34,
+    9.864644845798966e-35,
+    1.0759644677904251e-35]) #for 1 kg day
+    import matplotlib.pyplot as plt
+    set_default_plotting_params(fontsize=12)
+    plt.figure(figsize=(8,6))
+    small = 12
+    medium = 16
+    large = 20
+
+    ax = plt.gca()
+    plt.plot([b*1000 for b in background_rates],direct_cs_limits,label='Direct 90\% Confidence',color='red')
+    plt.plot([b*1000 for b in background_rates],mod_5sigma_limits,label='Modulation 5$\sigma$ Discovery',color='steelblue')
+    plt.plot([b*1000 for b in background_rates],mod_2sigma_limits,label='Modulation 2$\sigma$ Discovery',color='steelblue',ls='--')
+
+    ax.invert_xaxis()
+    plt.yscale('log')
+    plt.xscale('log')
+    plt.title("$F_{\mathrm{DM}} \propto 1/q^2$ Limit",fontsize=large)
+    plt.xlabel("Background Rate [events/kg/day] ")
+    plt.ylabel('$\overline{\sigma}_e$')
+    plt.text(0.99,0.95,'Si',fontsize=large,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
+    plt.text(0.99,0.89,'SNOLAB',fontsize=medium,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
+    plt.text(0.99,0.83,'$m_\chi$ = 1 MeV',fontsize=medium,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
+    plt.text(0.99,0.77,'1 kg-day',fontsize=medium,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
+
+    plt.legend(loc=3)
+    plt.savefig('figures/Silicon/direct_mod_limit_comparison_fdmq2.jpg')
+    plt.show()
+    plt.close()
+
