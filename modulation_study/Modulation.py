@@ -2178,7 +2178,7 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
     exposure_dict = {
         'Si': np.array([1 * nu.kg * nu.day,30 * nu.kg * nu.day,30 * nu.kg * nu.year]), #kg day, kg month, 30 kg year
         'Xe': np.array([1 * nu.tonne * nu.day,30 * nu.tonne * nu.day ,1 * nu.tonne * nu.year]),#tonne day, tonne month, 1 tonne year
-        'Ar': np.array([1 * nu.tonne * nu.day,30 * nu.tonne * nu.day, 17.4 * nu.tonne * nu.year])#tonne day, tonne month, ~17.4 tonne year
+        'Ar': np.array([1 * nu.tonne * nu.day,30 * nu.tonne * nu.day, 1 * nu.tonne * nu.year])#tonne day, tonne month, ~17.4 tonne year
     }
 
     time_units = {
@@ -2608,6 +2608,9 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
             # print(exp_str >=1e3)
             time_unit = time_unit_strs[i]
             exp_str = exposures[i] / time_units[material][i]
+            exp_str = np.round(exp_str)
+            if i == 1:
+                exp_str /=30
 
             if material=='Si':
                 mass_unit_str = 'kg'
