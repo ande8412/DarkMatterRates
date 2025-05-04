@@ -2717,8 +2717,11 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
             'Ar': 'Argon',
         }
         matstr = mat_str_dict[material]
+        
         savedir = f'figures/{matstr}'
-        plt.savefig(f'{savedir}/Mod_Sensitivity_{material}_CombinedFig_{ne}ebin_fdm{fdm}.jpg')
+
+        tag = 'verne' if useVerne else 'damascus'
+        plt.savefig(f'{savedir}/Mod_Sensitivity_{material}_CombinedFig_{ne}ebin_fdm{fdm}_{tag}.jpg')
 
     # plt.tight_layout()
     plt.show()
