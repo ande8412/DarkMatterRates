@@ -3787,7 +3787,7 @@ def significance(average,fracamp,exposure,background):
     return sig
 
 
-def find_sigma_cross_section(material,FDMn,test_mX,test_exposure,background,ne=1,loc='SNO',useVerne=True,fromFile=True,useQCDark = True,sigma=5):
+def find_sigma_cross_section(material,FDMn,test_mX,test_exposure,background,ne=1,loc='SNO',useVerne=True,fromFile=True,useQCDark = True,sigma=5,plot=False):
     from scipy.interpolate import Akima1DInterpolator 
     from tqdm.autonotebook import tqdm
     import os
@@ -3846,19 +3846,19 @@ def find_sigma_cross_section(material,FDMn,test_mX,test_exposure,background,ne=1
     true_cs = np.sort(true_cs)
 
 
-    
+    if plot:
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.title(f'mX {test_mX}, FDMn{FDMn}')
+        plt.xlabel('cross-section')
+        plt.ylabel("Significance")
+        plt.xscale('log')
+        plt.plot(true_cs,significances)
 
-    # import matplotlib.pyplot as plt
-    # plt.figure()
-    # plt.title(f'mX {test_mX}, FDMn{FDMn}')
-    # plt.xlabel('cross-section')
-    # plt.ylabel("Significance")
-    # plt.xscale('log')
-    # plt.plot(true_cs,significances)
 
+        plt.show()
+        plt.close()
 
-    # plt.show()
-    # plt.close()
     crop_indices = significances < 1000
     significances_x = significances[crop_indices]
     cs_y = true_cs[crop_indices]
@@ -3871,23 +3871,29 @@ def find_sigma_cross_section(material,FDMn,test_mX,test_exposure,background,ne=1
 
 
 
-def plot_silicon_1e_limit_comparison():
+def plot_silicon_1e_limit_comparison(plotsig=False):
     background_rates = [40,30,20,10,5,1,0.1] #events /g/day
     import numpy as np
+    import matplotlib.lines as mlines
 
     exp = 1 * nu.kg * nu.day
+    kgyear = 1 * nu.kg * nu.year
     mod_5sigma_limits = []
     mod_2sigma_limits = []
+    mod_2sigma_limits_kgyear = []
 
     for background in background_rates:
         background_rate = background / nu.g / nu.day
-        lim = find_sigma_cross_section('Si',2,1.,exp,background_rate,ne=1,loc='SNO',useVerne=True,fromFile=True,useQCDark = True)
+        lim = find_sigma_cross_section('Si',2,1.,exp,background_rate,ne=1,loc='SNO',useVerne=True,fromFile=True,useQCDark = True,plot=plotsig)
         lim1 = find_sigma_cross_section('Si',2,1.,exp,background_rate,ne=1,loc='SNO',useVerne=True,fromFile=True,useQCDark = True,sigma=2)
         mod_2sigma_limits.append(lim1)
-
+        lim1kgyear = find_sigma_cross_section('Si',2,1.,kgyear,background_rate,ne=1,loc='SNO',useVerne=True,fromFile=True,useQCDark = True,sigma=2)
+        mod_2sigma_limits_kgyear.append(lim1kgyear)
+    
         mod_5sigma_limits.append(lim)
     mod_5sigma_limits = np.array(mod_5sigma_limits)
     mod_2sigma_limits = np.array(mod_2sigma_limits)
+    mod_2sigma_limits_kgyear = np.array(mod_2sigma_limits_kgyear)
 
     #1 MeV Limits as function of background (g-day)
     import numpy as np
@@ -3899,30 +3905,42 @@ def plot_silicon_1e_limit_comparison():
     9.864644845798966e-35,
     1.0759644677904251e-35]) #for 1 kg day
     import matplotlib.pyplot as plt
-    set_default_plotting_params(fontsize=12)
+    set_default_plotting_params(fontsize=24)
     plt.figure(figsize=(8,6))
     small = 12
     medium = 16
-    large = 20
+    large = 24
 
     ax = plt.gca()
     plt.plot([b*1000 for b in background_rates],direct_cs_limits,label='Direct 90\% Confidence',color='red')
-    plt.plot([b*1000 for b in background_rates],mod_5sigma_limits,label='Modulation 5$\sigma$ Discovery',color='steelblue')
-    plt.plot([b*1000 for b in background_rates],mod_2sigma_limits,label='Modulation 2$\sigma$ Discovery',color='steelblue',ls='--')
+    # plt.plot([b*1000 for b in background_rates],mod_5sigma_limits,label='Modulation 5$\sigma$ Discovery',color='steelblue')
+    plt.plot([b*1000 for b in background_rates],mod_2sigma_limits,label='Modulation 2$\sigma$ Discovery  1 kg-day',color='steelblue')
+    plt.plot([b*1000 for b in background_rates],mod_2sigma_limits_kgyear,label='Modulation 2$\sigma$ Discovery 1 kg-year',color='steelblue',ls='--')
 
     ax.invert_xaxis()
     plt.yscale('log')
     plt.xscale('log')
     plt.title("$F_{\mathrm{DM}} \propto 1/q^2$ Limit",fontsize=large)
     plt.xlabel("Background Rate [events/kg/day] ")
-    plt.ylabel('$\overline{\sigma}_e$')
+    plt.ylabel('$\overline{\sigma}_e$ [cm$^2$]')
     plt.text(0.99,0.95,'Si',fontsize=large,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
-    plt.text(0.99,0.89,'SNOLAB',fontsize=medium,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
-    plt.text(0.99,0.83,'$m_\chi$ = 1 MeV',fontsize=medium,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
-    plt.text(0.99,0.77,'1 kg-day',fontsize=medium,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
+    plt.text(0.99,0.88,'SNOLAB',fontsize=medium,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
+    plt.text(0.99,0.81,'$m_\chi$ = 1 MeV',fontsize=medium,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
+    # plt.text(0.99,0.77,'1 kg-day',fontsize=medium,color='black',horizontalalignment='right',verticalalignment='center',transform = ax.transAxes)
+    plt.ylim(1e-36,1e-32)
 
-    plt.legend(loc=3)
-    plt.savefig('figures/Silicon/direct_mod_limit_comparison_fdmq2.jpg')
+    red = mlines.Line2D([], [], color='red', label='Direct')
+    blue = mlines.Line2D([], [], color='steelblue', label='Modulation')
+
+    legend1 = ax.legend(handles=[red,blue],loc='lower left',fontsize=medium,frameon=False)
+    ax.add_artist(legend1)
+
+    dashed = mlines.Line2D([], [], color='black', linestyle='--', label='1 kg-year')
+    solid = mlines.Line2D([], [], color='black', label='1 kg-day')
+    legend2 = ax.legend(handles=[solid, dashed], fontsize=medium, loc='lower right',frameon=False)
+
+
+    plt.savefig('figures/Silicon/direct_mod_limit_comparison_fdmq2.pdf')
     plt.show()
     plt.close()
 
