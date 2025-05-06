@@ -22,6 +22,7 @@ def set_default_plotting_params(fontsize=40):
     goldenx = 15
     goldeny = goldenx / golden
     plt.rcParams['figure.figsize']=(16,12)
+    return
 
 
 def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,useQCDark=True,DoScreen = True,verbose = False,flat=False,dmRateObject = None):
@@ -2109,7 +2110,7 @@ def modify_colormap(cmap_name,divisor=2, white_at_bottom=True):
 #     return
 
 
-def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVerne=True,fromFile=True,verbose=False,masses=None,sigmaEs=None,ne=1,shadeMFP=True,savefig=False,standardizeGrid = False,useQCDark=True,showProjection=False):
+def plotMaterialSignifianceFigure(loc,material='Si',plotConstraints=True,useVerne=True,fromFile=True,verbose=False,masses=None,sigmaEs=None,ne=1,shadeMFP=True,savefig=False,standardizeGrid = False,useQCDark=True,showProjection=False):
     from tqdm.autonotebook import tqdm
     import numpy as np
     import matplotlib.pyplot as plt
@@ -2131,13 +2132,13 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
     
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, sharex=False, sharey=False,layout='constrained',figsize=(26,26))
     ebinstr = f'{ne}' + '$e^-$ bin'
-    fdmstr = '$F_{\mathrm{DM}} \propto q^{-2}$' if fdm == 2 else '$F_{\mathrm{DM}} = 1$'
+    
     matdit = {
         'Si': 'Silicon',
         "Xe": 'Xenon',
         'Ar': "Argon"
     }
-    fig.suptitle(f"{matdit[material]} Sensitivity {fdmstr}",fontsize=large)
+    fig.suptitle(f"{matdit[material]} Sensitivity at {loc}",fontsize=large,y=1.03)
 
 
     temp_amps = []
@@ -2154,7 +2155,7 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
 
        
 
-    for loc in ["SNOLAB","SUPL"]:
+    for fdm in [0,2]:
         mini_mass_list = []
         mini_famp_list = []
         mini_cs_list = []
@@ -2193,11 +2194,13 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
         exposure = exposures[i]
         for j in range(ncols):
             if j == 0 or j==2:
-               first_index = 0 #SNOLAB
-               loc = "SNOLAB"
+               first_index = 0 #fdm-
+               fdm = 0
+               fdmstr = '$F_{\mathrm{DM}} = 1$'
             else:
                 first_index = 1 #SUPL
-                loc = "SUPL"
+                fdm = 2
+                fdmstr = '$F_{\mathrm{DM}} \propto q^{-2}$'
             # if j == 0 or j == 1:
             #     second_index = 0 #FDM 1
             #     fdm = 0
@@ -2343,18 +2346,18 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
                         xlow= 3
                         xhigh = mass_high
                         yhigh=1e-34
-                        ylow=1e-37
+                        ylow=1e-38
                     elif ne == 2:
                         xlow= 10
                         xhigh = mass_high
-                        yhigh=1e-32
-                        ylow=1e-36
+                        yhigh=1e-34
+                        ylow=1e-38
 
                     elif ne == 3 or ne == 4:
                         xlow = 10
                         xhigh = mass_high
-                        yhigh = 1e-31
-                        ylow = 1e-36
+                        yhigh = 1e-34
+                        ylow = 1e-38
                    
                     
 
@@ -2380,13 +2383,13 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
                     if ne == 2 or ne == 3:
                         xlow= 10
                         xhigh = mass_high
-                        yhigh=1e-31
-                        ylow=1e-36
+                        yhigh=1e-32
+                        ylow=1e-38
                     elif ne == 4:
                         xlow= 10
                         xhigh = mass_high
-                        yhigh = 1e-29
-                        ylow = 1e-36
+                        yhigh = 1e-32
+                        ylow = 1e-38
                 
 
          
@@ -2587,10 +2590,10 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
             horizontalalignment='center',
             verticalalignment='center',
             transform = current_ax.transAxes,c='Black',fontsize=medium,bbox=dict(boxstyle='square',edgecolor="black",linewidth=1,alpha=1,pad=0.2,facecolor='white'))
-            current_ax.text(0.14, 0.05, loc,
+            current_ax.text(0.14, 0.06, fdmstr,
             horizontalalignment='center',
             verticalalignment='center',
-            transform = current_ax.transAxes,c='Black',fontsize=small,zorder=3)#,bbox=dict(boxstyle='round',edgecolor="black",linewidth=1,alpha=1,pad=0.2,facecolor='white'))
+            transform = current_ax.transAxes,c='Black',fontsize=smaller,zorder=3)#,bbox=dict(boxstyle='round',edgecolor="black",linewidth=1,alpha=1,pad=0.2,facecolor='white'))
             # current_ax.text(0.02, 0.16, fdm_str,
             # horizontalalignment='left',
             # verticalalignment='center', 
@@ -2600,7 +2603,7 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
             current_ax.text(0.14, 0.13, e_bin_str,
             horizontalalignment='center',
             verticalalignment='center', 
-            transform = current_ax.transAxes,c='Black',fontsize=small,zorder=3)#,bbox=dict(boxstyle='round',edgecolor="black",linewidth=1,alpha=1,pad=0.2,facecolor='white'))
+            transform = current_ax.transAxes,c='Black',fontsize=smaller,zorder=3)#,bbox=dict(boxstyle='round',edgecolor="black",linewidth=1,alpha=1,pad=0.2,facecolor='white'))
 
             # 
 
@@ -2721,7 +2724,7 @@ def plotMaterialSignifianceFigure(fdm,material='Si',plotConstraints=True,useVern
         savedir = f'figures/{matstr}'
 
         tag = 'verne' if useVerne else 'damascus'
-        plt.savefig(f'{savedir}/Mod_Sensitivity_{material}_CombinedFig_{ne}ebin_fdm{fdm}_{tag}.jpg')
+        plt.savefig(f'{savedir}/Mod_Sensitivity_{material}_CombinedFig_{ne}ebin_loc{loc}_{tag}.jpg')
 
     # plt.tight_layout()
     plt.show()
@@ -2742,7 +2745,7 @@ def plotModulationFigure(fdm,fractional=False,plotConstraints=True,useVerne=True
     large = 48
     small = 36
     medium = 40
-    smaller = 30
+    smaller = 32
     smallest=16
     set_default_plotting_params(fontsize=large)
     # params = {'text.usetex' : True,
@@ -3315,16 +3318,12 @@ def plotRateComparison(material,sigmaE,mX_list,fdm,plotVerne=True,savefig=False,
 
 
             
-def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,savefig=False,savedir=None,verneOnly=False,damascusOnly=False,ne=1,showScatter=False,showFit=False,useQCDark=True,kgday=True):
+def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,savefig=False,savedir=None,verneOnly=False,damascusOnly=False,ne=1,showScatter=False,showFit=False,useQCDark=True,showErr=False):
     import numpy as np
     # plotting specifications
     import matplotlib.pyplot as plt
 
-    if kgday:
-        mass_factor = nu.kg
-    else:
-        mass_factor = nu.g
-    time_factor = nu.day
+
 
     #Options
     small = 32
@@ -3350,7 +3349,7 @@ def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,s
         mX = mX_list[i]
         sigmaE = sigmaE_list[i]
         current_ax.set_xlabel('$\Theta$\N{degree sign}')
-        kgstr = 'k' if kgday else ''
+        kgstr = 'k'
         current_ax.set_ylabel(f'Rate [events/{kgstr}g/day]')
         current_ax.grid()
         
@@ -3389,17 +3388,20 @@ def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,s
             isoangles,rates_high = get_modulated_rates(material,mX,sigmaE,fdm,useVerne=False,calcError="High",ne=ne,useQCDark=useQCDark)
             isoangles,rates_low = get_modulated_rates(material,mX,sigmaE,fdm,useVerne=False,calcError="Low",ne=ne,useQCDark=useQCDark)
             isoangles,rates_flat = get_modulated_rates(material,mX,sigmaE,fdm,useVerne=False,calcError="Low",ne=ne,useQCDark=useQCDark,flat=True)
-            rates *= mass_factor * time_factor
-            rates_high *= mass_factor * time_factor
-            rates_low *= mass_factor * time_factor
-            rates_flat *= mass_factor * time_factor
-
             rates = rates.flatten().numpy()
             rates_low = rates_low.flatten().numpy()
             rates_high = rates_high.flatten().numpy()
             rates_flat = rates_flat.flatten().numpy()
             isoangles = isoangles.flatten().numpy()
 
+
+
+            rates = rates * nu.kg * nu.day
+            rates_high = rates_high * nu.kg * nu.day
+            rates_low = rates_low * nu.kg * nu.day
+            rates_flat = rates_flat * nu.kg * nu.day
+
+            
 
             # current_ax.plot(isoangles,rates_flat,color='green',label="Flat",lw=3)
             maxv = np.max(rates_high)*1.2
@@ -3408,16 +3410,20 @@ def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,s
 
             rate_err = rates_high - rates
             if showScatter:
-                current_ax.errorbar(isoangles,rates,yerr=rate_err,linestyle='')
+                if showErr:
+                    current_ax.errorbar(isoangles,rates,yerr=rate_err,linestyle='')
                 current_ax.scatter(isoangles,rates,label='Data')
 
                 if showFit:
-                    try:
-                        angle_grid,fit_vector,parameters,error = fitted_rates(isoangles,rates,rate_err)
-                    except ValueError:
+                    if fdm == 2 and (material == 'Xe' or material == "Ar"):
+                        angle_grid,fit_vector,parameters,error = fitted_rates(isoangles,rates,linear=True)
+                    else:
                         try:
                             angle_grid,fit_vector,parameters,error = fitted_rates(isoangles,rates)
                         except ValueError:
+                            # try:
+                            #     angle_grid,fit_vector,parameters,error = fitted_rates(isoangles,rates)
+                            # except ValueError:
                             angle_grid,fit_vector,parameters,error = fitted_rates(isoangles,rates,linear=True)
                             
 
@@ -3435,10 +3441,11 @@ def plotRateComparisonSubplots(material,sigmaE_list,mX_list,fdm,plotVerne=True,s
 
         if not damascusOnly:
             isoangles_v,rates_v = get_modulated_rates(material,mX,sigmaE,fdm,useVerne=True,ne=ne,useQCDark=useQCDark)
-            rates_v *= mass_factor * time_factor
             rates_v = rates_v.flatten().numpy()
+            rates_v = rates_v * nu.kg  * nu.day
+            
          
-            current_ax.plot(isoangles_v,rates_v,ls='--',label="Verne")
+            current_ax.plot(isoangles_v,rates_v,ls='--',label="Verne",color='forestgreen')
             if np.max(rates_v) > maxv:
                 maxv = np.max(rates_v)
             if np.min(rates_v) < minv:
