@@ -28,7 +28,6 @@ DMeRates/Rates/
 # QCDark/
 # wimprates_mod/
 old_for_comparison/
-CLAUDE.md
 
 # Python build artifacts
 .pytest_cache/
