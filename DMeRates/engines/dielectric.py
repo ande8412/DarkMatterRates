@@ -35,6 +35,10 @@ from DMeRates.screening.dielectric import (
     normalize_dielectric_screening,
 )
 from DMeRates.spectrum import RateSpectrum
+from DMeRates.srdm.mediators import (
+    flux_mediator_spin as _flux_mediator_spin,
+    normalize_mediator_spin as _normalize_mediator_spin,
+)
 
 _VALID_MEDIATORS = {0, 2}  # FDMn
 _LARGE_MA_EV = 1e10  # proxy for m_A → ∞ in heavy-mediator limit; >> max q in any grid
@@ -284,11 +288,8 @@ def _compute_dRdE_srdm(
     """
     screening = normalize_dielectric_screening(screening)
 
-    if mediator_spin != "vector":
-        raise NotImplementedError(
-            f"mediator_spin={mediator_spin!r} not yet supported. "
-            "Planned future modes: 'scalar', 'approx', 'approx_full'."
-        )
+    mediator_spin = _normalize_mediator_spin(mediator_spin)
+    flux_spin = _flux_mediator_spin(mediator_spin)
 
     if FDMn not in _VALID_MEDIATORS:
         raise ValueError(
@@ -301,11 +302,15 @@ def _compute_dRdE_srdm(
     eps, q_ame, E_eV, M_cell_eV, V_cell_bohr = _bare_floats_from_loader(dielectric)
 
     # ---- Bare constants.
-    kg_QCD, alpha_FS, me_eV, c_kms, cm2sec, sec2yr = _qcdark2_constants_bare()
+    kg_QCD, alpha_FS, me_eV, _c_kms, _cm2sec, sec2yr = _qcdark2_constants_bare()
     ame_eV = alpha_FS * me_eV
     q_eV = q_ame * ame_eV
 
-    # ---- Flux (via SRDM infrastructure; convert back to raw dPhi/d(v_kms) for QCDark2 convention).
+    # ---- Flux (via SRDM infrastructure).
+    # load_srdm_flux is the only km/s -> v/c conversion boundary. It returns
+    # dPhi/d(v/c) in numericalunits, so the engine integrates that directly over
+    # dimensionless v/c. Do not convert back to raw dPhi/dv_kms here; that
+    # convention is only for QCDark2 reference-code matching in the notebook.
     from DMeRates.srdm.flux_loader import load_srdm_flux as _load_flux
     from DMeRates.srdm.manifest import find_entry as _find_entry
     from DMeRates.data.registry import DataRegistry as _DR
@@ -315,7 +320,7 @@ def _compute_dRdE_srdm(
     _resolved_flux_path = _DR.srdm_flux_file(entry["filename"])
 
     v_oc = v_tensor.numpy()
-    dphi_dvk = dphi_tensor.numpy() * float(nu.cm**2 * nu.s) / c_kms
+    dphi_dv_over_c = dphi_tensor.numpy() * float(nu.cm**2 * nu.s)
 
     # ---- Material constants.
     V_cell_eV3 = V_cell_bohr / ame_eV**3
@@ -333,8 +338,7 @@ def _compute_dRdE_srdm(
     # Peak tensor shape: (N_v, N_q, N_E) ≈ (299, 1251, 501).
     from DMeRates.srdm.kinematics import (
         q_bounds as _q_bounds,
-        H_vector as _H_vector,
-        mediator_propagator_inv_sq as _prop_inv_sq,
+        srdm_integrand_kernel as _srdm_integrand_kernel,
         reference_propagator_factor as _ref_prop,
     )
 
@@ -342,7 +346,7 @@ def _compute_dRdE_srdm(
     q = torch.as_tensor(q_eV, dtype=torch.float64)
     E = torch.as_tensor(E_eV, dtype=torch.float64)
     elf_t = torch.as_tensor(elf_eff, dtype=torch.float64)
-    phi = torch.as_tensor(dphi_dvk, dtype=torch.float64)
+    phi = torch.as_tensor(dphi_dv_over_c, dtype=torch.float64)
 
     gamma_v = 1.0 / torch.sqrt(1.0 - v**2)
     E_chi = gamma_v * mX_eV
@@ -351,9 +355,15 @@ def _compute_dRdE_srdm(
     q3 = q[None, :, None]
     E3 = E[None, None, :]
 
-    H_V = _H_vector(q3, E_chi_3, E_chi_3 - E3)
-    prop_inv = _prop_inv_sq(q3, E3, mA_eV_val)
-    integrand_q = q3**3 / (E_chi_3 - E3) * H_V * prop_inv * elf_t[None, :, :]
+    kernel = _srdm_integrand_kernel(
+        q3,
+        E3,
+        E_chi_3,
+        mX_eV,
+        mA_eV_val,
+        mediator_spin,
+    )
+    integrand_q = kernel * elf_t[None, :, :]
 
     # ---- q-integration: masked trapezoid matching QCDark2 slicing convention.
     q_min, q_max = _q_bounds(v, E, mX_eV)
@@ -392,6 +402,7 @@ def _compute_dRdE_srdm(
         metadata=dict(
             halo_model="srdm",
             mediator_spin=mediator_spin,
+            flux_mediator_spin=flux_spin,
             flux_file=str(_resolved_flux_path),
             mX_eV=float(mX_eV),
             sigma_e_cm2=float(sigma_e_cm2),

@@ -1,6 +1,11 @@
 from .Constants import *
 from .DM_Halo import DM_Halo_Distributions
 from .engines.dielectric import compute_dRdE as compute_qcdark2_dRdE
+from .engines.form_factor import (
+    semiconductor_dRdE_spectrum as compute_form_factor_spectrum,
+    semiconductor_rates_from_spectrum,
+)
+from .engines.noble_gas import noble_srdm_dRdE_spectrum
 from .form_factor import form_factor,form_factorQEDark,formFactorNoble
 from .halo.analytic import AnalyticHaloProvider
 from .halo.file_loader import FileHaloProvider, load_halo_file_data
@@ -14,6 +19,11 @@ from .responses.dielectric_materials import (
     require_qcdark2_pair_energy,
 )
 from .ionization.step_function import step_probabilities
+from .screening.lindhard import DEFAULT_LINDHARD_ETA_EV, lindhard_screening
+from .screening.semiconductor import (
+    semiconductor_native_screening_factor,
+    semiconductor_screening_factor,
+)
 from .screening.thomas_fermi import thomas_fermi_screening, tfscreening
 import numericalunits as nu
 
@@ -397,6 +407,17 @@ class DMeRate:
             qArr=self.qArr,
             do_screen=DoScreen,
         )
+
+    def semiconductor_native_screening(self, DoScreen, screening=None, lindhard_eta_eV=DEFAULT_LINDHARD_ETA_EV):
+        """Selected QEDark/QCDark1 screening on the native E x q grid."""
+        return semiconductor_native_screening_factor(
+            material=self.material,
+            Earr=self.Earr,
+            qArr=self.qArr,
+            screening=screening,
+            do_screen=DoScreen,
+            lindhard_eta_eV=lindhard_eta_eV,
+        )
     
     def thomas_fermi_screening(self,q,E,doScreen=True):
         """Vectorized Thomas-Fermi screening calculation.
@@ -414,6 +435,27 @@ class DMeRate:
             q=q,
             E=E,
             do_screen=doScreen,
+        )
+
+    def lindhard_screening(self, q, E, doScreen=True, eta_eV=DEFAULT_LINDHARD_ETA_EV):
+        """Vectorized Lindhard screening factor, 1 / |epsilon_L(q, E)|."""
+        return lindhard_screening(
+            material=self.material,
+            q=q,
+            E=E,
+            do_screen=doScreen,
+            eta_eV=eta_eV,
+        )
+
+    def semiconductor_screening(self, q, E, doScreen=True, screening=None, lindhard_eta_eV=DEFAULT_LINDHARD_ETA_EV):
+        """Selected QEDark/QCDark1 screening on a q x E grid."""
+        return semiconductor_screening_factor(
+            material=self.material,
+            q=q,
+            E=E,
+            screening=screening,
+            do_screen=doScreen,
+            lindhard_eta_eV=lindhard_eta_eV,
         )
     
     
@@ -546,7 +588,7 @@ class DMeRate:
 
 
 
-    def vectorized_dRdE(self,mX,FDMn,halo_model,DoScreen=True,halo_id_params=None,integrate=True,debug=False,unitize=False):
+    def vectorized_dRdE(self,mX,FDMn,halo_model,DoScreen=True,halo_id_params=None,integrate=True,debug=False,unitize=False,screening=None,lindhard_eta_eV=DEFAULT_LINDHARD_ETA_EV):
         """Calculate differential rate (dR/dE) using vectorized operations for semiconductor materials.
         
         Args:
@@ -554,6 +596,8 @@ class DMeRate:
             FDMn: Form factor model
             halo_model: Velocity distribution model
             DoScreen: Apply screening effects
+            screening: Explicit semiconductor screening mode; overrides DoScreen when set
+            lindhard_eta_eV: Lindhard imaginary broadening in eV
             halo_id_params: Parameters for step function model (used for halo independent analysis)
             integrate: Perform numerical integration
             debug: Return debug information
@@ -605,7 +649,13 @@ class DMeRate:
                 qdenom *=(self.FDM(q,FDMn))**2
                 #parts that depend on q and E
                 eta = eta_func(vmin(q,self.Earr,mX))
-                tf_f = (self.thomas_fermi_screening(q,self.Earr,doScreen=DoScreen))**2
+                tf_f = (self.semiconductor_screening(
+                    q,
+                    self.Earr,
+                    doScreen=DoScreen,
+                    screening=screening,
+                    lindhard_eta_eV=lindhard_eta_eV,
+                ))**2
                 ff_f = ff_arr[:-1,:]
                 # ff_f = ff_interp((q,Earr_unit))
                 result = eta * tf_f * ff_f
@@ -626,7 +676,11 @@ class DMeRate:
             ff_arr = ff_arr.T
             # ff_arr = torch.from_numpy(ff_arr)
             # ff_arr = ff_arr.to(self.device) #form factor (unitless)
-            tf_factor = (self.TFscreening(DoScreen)**2) #unitless
+            tf_factor = (self.semiconductor_native_screening(
+                DoScreen,
+                screening=screening,
+                lindhard_eta_eV=lindhard_eta_eV,
+            )**2) #unitless
             result = torch.einsum("i,ij->ij",self.Earr,torch.ones_like(etas))
             result *=etas
             result *= fdm_factor     
@@ -648,7 +702,11 @@ class DMeRate:
             if integrate:
                 vMins = self.vMin_tensor(self.qArr,self.Earr,mX)
                 etas = self.get_parametrized_eta(vMins,mX,halo_model,halo_id_params=halo_id_params)
-                tf_factor = (self.TFscreening(DoScreen)**2) #unitless
+                tf_factor = (self.semiconductor_native_screening(
+                    DoScreen,
+                    screening=screening,
+                    lindhard_eta_eV=lindhard_eta_eV,
+                )**2) #unitless
                 fdm_factor = (self.FDM(self.qArr,FDMn))**2 #unitless
                 ff_arr = ff_arr.T
 
@@ -764,10 +822,15 @@ class DMeRate:
         useVerne=False,
         calcErrors=None,
         debug=False,
+        mediator_spin='vector',
+        sigma_e=None,
     ):
         """Calculate QCDark2 ne rates by integrating the native dielectric dR/dE."""
         import numpy
         import torch
+        if halo_model == 'srdm':
+            from .srdm.mediators import normalize_mediator_spin
+            mediator_spin = normalize_mediator_spin(mediator_spin)
 
         if screening is None:
             raise ValueError(
@@ -800,11 +863,12 @@ class DMeRate:
                 mX_array = torch.tensor([mX_array])
 
         rhoX_eV_per_cm3 = float(self.rhoX * nu.c0**2 / (nu.eV / nu.cm**3))
-        sigma_e_cm2 = float(self.cross_section / nu.cm**2)
+        sigma_e_cm2 = float(self.cross_section / nu.cm**2) if sigma_e is None else float(sigma_e)
         dielectric = self._qcdark2_dielectric_for_variant(variant)
         prob_fn_tiled = self._qcdark2_probabilities(nes, pair_energy=pair_energy)
         dRdnEs = torch.zeros((len(mX_array), len(nes)))
 
+        debug_last_dRdE = None
         for m, mX in enumerate(mX_array):
             eta_provider = None
             if halo_id_params is not None:
@@ -830,6 +894,7 @@ class DMeRate:
                 screening=screening,
                 variant=variant,
                 sigma_e_cm2=sigma_e_cm2,
+                mediator_spin=mediator_spin,
                 rhoX_eV_per_cm3=rhoX_eV_per_cm3,
                 halo_distribution=self.DM_Halo,
                 eta_provider=eta_provider,
@@ -841,9 +906,10 @@ class DMeRate:
 
             dRdne = torch.trapezoid(spectrum.dR_dE * prob_fn_tiled, x=spectrum.E, axis=1)
             dRdnEs[m, :] = dRdne
+            debug_last_dRdE = spectrum.dR_dE
 
         if debug:
-            return dRdnEs.T
+            return dRdnEs.T, debug_last_dRdE, prob_fn_tiled
         return dRdnEs.T
 
     def calculate_qcdark2_spectrum(
@@ -919,7 +985,7 @@ class DMeRate:
             return 0.0 * (1 / (nu.kg * nu.year))
         return torch.trapezoid(spectrum.dR_dE[mask], x=spectrum.E[mask], axis=0)
     
-    def calculate_semiconductor_rates(self,mX_array,halo_model,FDMn,ne,integrate=True,DoScreen=True,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,screening=None,variant=None,pair_energy=None):
+    def calculate_semiconductor_rates(self,mX_array,halo_model,FDMn,ne,integrate=True,DoScreen=True,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,screening=None,variant=None,pair_energy=None,mediator_spin='vector',sigma_e=None,lindhard_eta_eV=DEFAULT_LINDHARD_ETA_EV):
         """Calculate rates for semiconductor crystals (Si, Ge).
         
         Args:
@@ -929,6 +995,8 @@ class DMeRate:
             ne: Number of electron-hole pairs
             integrate: Perform numerical integration vs using preintegrated version
             DoScreen: Apply screening effects
+            screening: Explicit screening mode for QEDark/QCDark1 or QCDark2
+            lindhard_eta_eV: Lindhard imaginary broadening in eV
             isoangle: isoangle (for modulated distributions) (number from 0 -35 with the true isoangle being 5x that value)
             halo_id_params: Parameters for step function model (used for halo independent analysis)
             useVerne: Use Verne distribution
@@ -940,6 +1008,9 @@ class DMeRate:
         """
         import torch
         import numpy
+        if halo_model == 'srdm':
+            from .srdm.mediators import normalize_mediator_spin
+            mediator_spin = normalize_mediator_spin(mediator_spin)
         if self.form_factor_type == 'qcdark2':
             return self.calculate_qcdark2_rates(
                 mX_array=mX_array,
@@ -954,6 +1025,8 @@ class DMeRate:
                 useVerne=useVerne,
                 calcErrors=calcErrors,
                 debug=debug,
+                mediator_spin=mediator_spin,
+                sigma_e=sigma_e,
             )
         if self.material == 'Ge':
             if self.ionization_func is not self.step_probabilities:
@@ -998,25 +1071,70 @@ class DMeRate:
                     print('unknown data type')
 
         dRdnEs = torch.zeros((len(mX_array),len(nes)))
+        sigma_e_cm2 = float(self.cross_section / nu.cm**2) if sigma_e is None else float(sigma_e)
 
+        debug_last_dRdE = None
         for m,mX in enumerate(mX_array):
-            self.setup_halo_data(mX,FDMn,halo_model,isoangle=isoangle,useVerne=useVerne,calcErrors=calcErrors)
-            dRdE = self.vectorized_dRdE(mX,FDMn,halo_model,DoScreen=DoScreen,halo_id_params=halo_id_params,integrate=integrate) #this is in 1 /kg/year/eV , but units are still implicit
-
-
-            if integrate:
-                #TODO
-                #maybe change this to simpsons rule too
-                dRdne = torch.trapezoid(dRdE*prob_fn_tiled,x=self.Earr, axis = 1)
+            if halo_model == 'srdm':
+                spectrum = compute_form_factor_spectrum(
+                    material=self.material,
+                    mX=mX,
+                    FDMn=FDMn,
+                    halo_model=halo_model,
+                    DoScreen=DoScreen,
+                    integrate=integrate,
+                    QEDark=self.QEDark,
+                    form_factor=self.form_factor,
+                    qArr=self.qArr,
+                    Earr=self.Earr,
+                    Ei_array=self.Ei_array,
+                    dtype_str=self.dtype_str,
+                    reduced_mass_fn=self.reduced_mass,
+                    fdm_fn=self.FDM,
+                    get_parametrized_eta_fn=self.get_parametrized_eta,
+                    vmin_tensor_fn=self.vMin_tensor,
+                    tfscreening_fn=self.TFscreening,
+                    thomas_fermi_screening_fn=self.thomas_fermi_screening,
+                    halo_id_params=halo_id_params,
+                    sigma_e_cm2=sigma_e_cm2,
+                    mediator_spin=mediator_spin,
+                    screening=screening,
+                    lindhard_eta_eV=lindhard_eta_eV,
+                )
+                self.Earr = spectrum.E
+                dRdne = semiconductor_rates_from_spectrum(
+                    spectrum,
+                    prob_fn_tiled,
+                    integrate=integrate,
+                )
+                debug_last_dRdE = spectrum.dR_dE
             else:
-                # Legacy QEDark summed these grid values directly; since the
-                # semiconductor form-factor grids use dE=0.1 eV, dE*10 supplies
-                # the missing energy unit as 1 eV without changing that convention.
-                dRdne = torch.sum(dRdE*prob_fn_tiled*self.form_factor.dE*10, axis = 1)
+                self.setup_halo_data(mX,FDMn,halo_model,isoangle=isoangle,useVerne=useVerne,calcErrors=calcErrors)
+                dRdE = self.vectorized_dRdE(
+                    mX,
+                    FDMn,
+                    halo_model,
+                    DoScreen=DoScreen,
+                    halo_id_params=halo_id_params,
+                    integrate=integrate,
+                    screening=screening,
+                    lindhard_eta_eV=lindhard_eta_eV,
+                ) #this is in 1 /kg/year/eV , but units are still implicit
+                debug_last_dRdE = dRdE
+
+                if integrate:
+                    #TODO
+                    #maybe change this to simpsons rule too
+                    dRdne = torch.trapezoid(dRdE*prob_fn_tiled,x=self.Earr, axis = 1)
+                else:
+                    # Legacy QEDark summed these grid values directly; since the
+                    # semiconductor form-factor grids use dE=0.1 eV, dE*10 supplies
+                    # the missing energy unit as 1 eV without changing that convention.
+                    dRdne = torch.sum(dRdE*prob_fn_tiled*self.form_factor.dE*10, axis = 1)
 
             dRdnEs[m,:] = dRdne
         if debug:
-            return dRdnEs.T,dRdE,prob_fn_tiled
+            return dRdnEs.T,debug_last_dRdE,prob_fn_tiled
         return dRdnEs.T #should be in kg/year
     
     def rate_dme_shell(self,mX,FDMn,halo_model,shell_key,halo_id_params=None,debug=False,unitize=False):
@@ -1315,7 +1433,7 @@ class DMeRate:
 
 
 
-    def calculate_nobleGas_rates(self,mX_array,halo_model,FDMn,ne,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,returnShells=False):
+    def calculate_nobleGas_rates(self,mX_array,halo_model,FDMn,ne,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,returnShells=False,sigma_e=None,mediator_spin='vector'):
         """Calculate rates for noble gas targets (Xe, Ar).
         
             Args:
@@ -1329,6 +1447,8 @@ class DMeRate:
                 calcErrors: Calculate errors ('High'/'Low')
                 debug: Return debug information
                 returnShells: Return shell-by-shell breakdown
+                sigma_e: SRDM cross section in cm^2; defaults to self.cross_section
+                mediator_spin: SRDM mediator mode. Noble SRDM supports 'vector'.
                 
             Returns:
                 Calculated rates (and shell breakdown if requested)
@@ -1377,11 +1497,27 @@ class DMeRate:
         else:        
             dRdnEs = torch.zeros((len(mX_array),len(nes)))
 
-
+        sigma_e_cm2 = float(self.cross_section / nu.cm**2) if sigma_e is None else float(sigma_e)
         
         for m,mX in enumerate(mX_array):
-            self.setup_halo_data(mX,FDMn,halo_model,isoangle=isoangle,useVerne=useVerne,calcErrors=calcErrors)
-            drs = self.noble_dRdE(mX,FDMn,halo_model,halo_id_params=halo_id_params,debug=False,unitize=False)
+            if halo_model == 'srdm':
+                spectrum = noble_srdm_dRdE_spectrum(
+                    material=self.material,
+                    mX=mX,
+                    FDMn=FDMn,
+                    mediator_spin=mediator_spin,
+                    sigma_e_cm2=sigma_e_cm2,
+                    form_factor=self.form_factor,
+                    qArrdict=self.qArrdict,
+                    Earr=self.Earr,
+                    reduced_mass_fn=self.reduced_mass,
+                    fdm_fn=self.FDM,
+                    vmin_tensor_fn=self.vMin_tensor,
+                )
+                drs = spectrum.shell_spectra
+            else:
+                self.setup_halo_data(mX,FDMn,halo_model,isoangle=isoangle,useVerne=useVerne,calcErrors=calcErrors)
+                drs = self.noble_dRdE(mX,FDMn,halo_model,halo_id_params=halo_id_params,debug=False,unitize=False)
             dRdnEs_by_shell =  self.rates_to_ne(drs,nes,p_primary = 1,p_secondary = 0.83, swap_4s4p = True)
             dRdnEs_by_shell = torch.stack(list(dRdnEs_by_shell.values()))
             dRdnE_sum = torch.sum(dRdnEs_by_shell,axis=0)
@@ -1408,7 +1544,7 @@ class DMeRate:
 
 
 
-    def calculate_rates(self,mX_array,halo_model,FDMn,ne,integrate=True,DoScreen=True,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,screening=None,variant=None,pair_energy=None):
+    def calculate_rates(self,mX_array,halo_model,FDMn,ne,integrate=True,DoScreen=True,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,screening=None,variant=None,pair_energy=None,mediator_spin='vector',sigma_e=None,lindhard_eta_eV=DEFAULT_LINDHARD_ETA_EV):
         """Main rate calculation method that routes to appropriate implementation.
         
         Args:
@@ -1418,6 +1554,8 @@ class DMeRate:
             ne: Number of electrons/electron-hole pairs (list/int)
             integrate: Perform numerical integration
             DoScreen: Apply screening effects
+            screening: Explicit screening mode
+            lindhard_eta_eV: Lindhard imaginary broadening in eV
             isoangle: isoangle (for modulated distributions) (number from 0 -35 with the true isoangle being 5x that value)
             halo_id_params: Parameters for step function model (used for halo independent analysis)
             useVerne: Use Verne distribution
@@ -1427,7 +1565,9 @@ class DMeRate:
         Returns:
             Calculated rates
         """
-
+        if halo_model == 'srdm':
+            from .srdm.mediators import normalize_mediator_spin
+            mediator_spin = normalize_mediator_spin(mediator_spin)
         if self.form_factor_type == 'qcdark2':
             return self.calculate_semiconductor_rates(
                 mX_array,
@@ -1444,6 +1584,9 @@ class DMeRate:
                 screening=screening,
                 variant=variant,
                 pair_energy=pair_energy,
+                mediator_spin=mediator_spin,
+                sigma_e=sigma_e,
+                lindhard_eta_eV=lindhard_eta_eV,
             )
         if self.material == 'Si' or self.material =='Ge':
             return self.calculate_semiconductor_rates(
@@ -1461,9 +1604,25 @@ class DMeRate:
                 screening=screening,
                 variant=variant,
                 pair_energy=pair_energy,
+                mediator_spin=mediator_spin,
+                sigma_e=sigma_e,
+                lindhard_eta_eV=lindhard_eta_eV,
             )
         if self.material == 'Xe' or self.material == 'Ar':
-            return self.calculate_nobleGas_rates(mX_array,halo_model,FDMn,ne,isoangle=isoangle,halo_id_params=halo_id_params,useVerne=useVerne,calcErrors=calcErrors,debug=debug,returnShells=False)
+            return self.calculate_nobleGas_rates(
+                mX_array,
+                halo_model,
+                FDMn,
+                ne,
+                isoangle=isoangle,
+                halo_id_params=halo_id_params,
+                useVerne=useVerne,
+                calcErrors=calcErrors,
+                debug=debug,
+                returnShells=False,
+                sigma_e=sigma_e,
+                mediator_spin=mediator_spin,
+            )
     
     
     

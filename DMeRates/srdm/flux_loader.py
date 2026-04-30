@@ -8,6 +8,7 @@ import numpy as np
 import numericalunits as nu
 from DMeRates.data.registry import DataRegistry
 from DMeRates.srdm.manifest import find_entry
+from DMeRates.srdm.mediators import flux_mediator_spin, normalize_mediator_spin
 
 
 def load_srdm_flux(
@@ -27,23 +28,20 @@ def load_srdm_flux(
                    integration weight for a trapezoid integral over d(v/c).
 
     Raises:
-        NotImplementedError: if mediator_spin is not in the supported set.
+        ValueError: if mediator_spin is invalid.
         FileNotFoundError: if no manifest entry matches the lookup tuple.
             Message includes the full lookup tuple AND the manifest path.
     """
-    _SUPPORTED_SPINS = {'vector'}
-    if mediator_spin not in _SUPPORTED_SPINS:
-        raise NotImplementedError(
-            f"mediator_spin={mediator_spin!r} is not yet supported. "
-            f"Planned future modes: 'scalar', 'approx', 'approx_full'."
-        )
+    mediator_spin = normalize_mediator_spin(mediator_spin)
+    flux_spin = flux_mediator_spin(mediator_spin)
     entry = find_entry(mX_eV, sigma_e_cm2, FDMn, mediator_spin)
     if entry is None:
         manifest_path = DataRegistry.srdm_manifest()
         raise FileNotFoundError(
             f"No SRDM flux file registered for "
             f"(mX_eV={mX_eV}, sigma_e_cm2={sigma_e_cm2}, "
-            f"FDMn={FDMn}, mediator_spin={mediator_spin!r}). "
+            f"FDMn={FDMn}, mediator_spin={mediator_spin!r}, "
+            f"flux_mediator_spin={flux_spin!r}). "
             f"See manifest at: {manifest_path}"
         )
 

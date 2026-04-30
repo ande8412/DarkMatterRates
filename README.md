@@ -23,6 +23,39 @@ I am still working on documentation, so if you happen to see this before this co
 
 There are examples in the [example notebook](DMeRates_Examples.ipynb). 
 
+### API conventions (QCDark2 + SRDM)
+
+- Public mass convention: `DMeRate.calculate_rates(...)` expects `mX_array` in **MeV** for all halo models, including `halo_model='srdm'`.
+- Internal SRDM convention: SRDM manifest and engine lookup keys are in **eV** (`halo_data/srdm/manifest.json` and SRDM internals).
+- QEDark/QCDark1 semiconductor screening accepts `screening='none'`, `screening='thomas_fermi'`, or `screening='lindhard'`. If `screening` is omitted, legacy `DoScreen=True/False` behavior is preserved.
+- The analytic Lindhard option applies `|f_crys(E,q)|^2 -> |f_crys(E,q)|^2 / |epsilon_L(E,q)|^2` with default `lindhard_eta_eV=0.1`; Si/Ge `omegaP` and `qTF` are the Table-I analytical-screening constants from arXiv:2306.14944.
+- Lindhard-screening references: Lindhard 1954; arXiv:2404.10066 for the `1/|epsilon|^2` direct-detection correction; arXiv:2306.14944 Eq. (11)/Table I and Cappellini et al., Phys. Rev. B 47, 9892 (1993), for the existing analytical-screening constants/convention.
+- QCDark2 requires explicit screening in public calls: pass `screening='rpa'` or `screening='none'`.
+- Canonical SRDM flux-file source: [Solar-Reflected-Dark-Matter-Flux](https://github.com/hlxuhep/Solar-Reflected-Dark-Matter-Flux).
+- Current support and missing-scope notes: see `tests/current_status.md` when present, and the “Still Missing / Not Yet Validated” status notes in repo docs/runbooks.
+
+
+### Still Missing / Not Yet Validated
+
+The following items are **not** present or not fully validated after the current merge:
+
+**Out of scope (not implemented):**
+- Anisotropic or direction-dependent SRDM flux
+- Auto-download/cache for SRDM flux archives; large-grid memory chunking
+- Digitized Fig. 22 numerical regression; full Figs. 23+ constraints/projections reproduction
+- Validated pair-energy constants for GaAs, SiC, Diamond
+
+**Implemented but validation-limited:**
+- Noble gas / wimprates SRDM is available for vector/dark-photon flux files; smoke-tested for Xe/Ar, no external numeric reference yet.
+- QEDark/QCDark1 analytic Lindhard screening is available for halo and SRDM paths, but Fig. 22 numerical agreement is not yet established.
+- SRDM for QCDark1/QEDark (all mediator modes): smoke-tested; no external cross-code calibration
+- QEDark/QCDark1 screened SRDM: Thomas-Fermi and analytic Lindhard are available; no external reference
+- Non-Si QCDark2 materials and SRDM paths beyond Si: smoke coverage only
+- Fig. 22 visual validation: notebook runs but curves do not reproduce the paper figure; discrepancy not yet understood
+
+**Data-dependent:** modulation notebook requires Dryad/DaMaSCUS data; QCDark2 requires dielectric HDF5 files.
+
+For the full validation record see [`tests/current_status.md`](tests/current_status.md).
 
 ### Dependencies
 
@@ -35,7 +68,3 @@ If you make use of this code or numerical results please see the CITATION.cff. I
 
 ## Papers that used this code
 [arXiv:2507.00344](http://arxiv.org/abs/2507.00344)
-
-
-
-

@@ -29,3 +29,19 @@ DMeRates/Rates/
 # wimprates_mod/
 old_for_comparison/
 CLAUDE.md
+
+# Python build artifacts
+.pytest_cache/
+*.egg-info/
+
+# Local Claude Code config (machine-specific permissions)
+.claude/settings.local.json
+
+# agents/ runbooks and summaries — AI orchestration scripts, local-only
+agents/
+agent_summaries/
+
+# Local reference material and generated validation images
+tests/fig22_paper_reference/
+tests/fig22_comparison.png
+tests/tests/

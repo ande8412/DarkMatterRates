@@ -142,13 +142,29 @@ QCDARK2_REFS = {
 #          (nearest grid point to 50 keV), sigma_e=1.098541e-38 cm^2,
 #          FDMn=2 (light mediator, m_A'=0), vector, screening=RPA
 # Flux:   halo_data/srdm/srdm_dphidv_DPLM_row10_col8.txt
-# Units:  events / kg / year / eV  (bare physical numbers)
+# Units:  events / kg / year / eV  (physical loader convention:
+#         dPhi/d(v/c), integrated over dimensionless v/c)
 # ---------------------------------------------------------------------------
 QCDARK2_SRDM_REFS = {
     'Si_50keV_vector_light': [
-        (  8.10, 8.504347e-07),
-        ( 14.90, 2.270760e-06),
-        ( 21.70, 1.719587e-06),
+        (  8.10, 2.549539e-01),
+        ( 14.90, 6.807567e-01),
+        ( 21.70, 5.155191e-01),
+    ],
+    'Si_50keV_scalar_light': [
+        (  8.10, 2.546948868e-01),
+        ( 14.90, 6.792294797e-01),
+        ( 21.70, 5.146077259e-01),
+    ],
+    'Si_50keV_approx_light': [
+        (  8.10, 2.546450944e-01),
+        ( 14.90, 6.791123814e-01),
+        ( 21.70, 5.144266838e-01),
+    ],
+    'Si_50keV_approx_full_light': [
+        (  8.10, 2.549200157e-01),
+        ( 14.90, 6.802473915e-01),
+        ( 21.70, 5.153765292e-01),
     ],
 }
 

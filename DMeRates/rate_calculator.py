@@ -28,15 +28,27 @@ class RateCalculator:
                 "Use one of: qcdark2, qcdark1, qedark, wimprates."
             )
 
-    def calculate_rates(self, *, mX_array, halo_model, FDMn, ne, pair_energy=None, **kwargs):
+    def calculate_rates(
+        self,
+        *,
+        mX_array,
+        halo_model,
+        FDMn,
+        ne,
+        pair_energy=None,
+        mediator_spin="vector",
+        **kwargs,
+    ):
         """Calculate ne rates using the configured backend."""
+        screening = kwargs.pop("screening", self.screening)
         if self.backend == "qcdark2":
             return self._legacy.calculate_rates(
                 mX_array=mX_array,
                 halo_model=halo_model,
                 FDMn=FDMn,
                 ne=ne,
-                screening=self.screening,
+                mediator_spin=mediator_spin,
+                screening=screening,
                 variant=self.variant,
                 pair_energy=pair_energy,
                 **kwargs,
@@ -46,6 +58,8 @@ class RateCalculator:
             halo_model=halo_model,
             FDMn=FDMn,
             ne=ne,
+            mediator_spin=mediator_spin,
+            screening=screening,
             **kwargs,
         )
 

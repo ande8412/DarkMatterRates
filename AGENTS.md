@@ -38,6 +38,18 @@ To regenerate modulated rates (requires halo data from Dryad):
 jupyter notebook modulation_study/modulation_rates_generating.ipynb
 ```
 
+## Current API Conventions (QCDark2 + SRDM)
+
+- Public mass convention: `DMeRate.calculate_rates(...)` takes `mX_array` in **MeV** for every halo model, including `halo_model='srdm'`.
+- Internal SRDM convention: SRDM manifest/engine keys are in **eV** (not public API units), including `halo_data/srdm/manifest.json`.
+- QEDark/QCDark1 semiconductor screening accepts `screening='none'`, `screening='thomas_fermi'`, or `screening='lindhard'`. Omitting `screening` preserves legacy `DoScreen=True/False` behavior.
+- Analytic Lindhard screening applies `1 / |epsilon_L(E,q)|^2` with default `lindhard_eta_eV=0.1`; Si/Ge `omegaP` and `qTF` come from arXiv:2306.14944 Table I, with `vF=sqrt(3) omegaP/qTF`.
+- Lindhard-screening references: Lindhard 1954; arXiv:2404.10066 for the `1/|epsilon|^2` direct-detection correction; arXiv:2306.14944 Eq. (11)/Table I and Cappellini et al., Phys. Rev. B 47, 9892 (1993), for the existing analytical-screening constants/convention.
+- QCDark2 requires explicit screening in public calls: pass `screening='rpa'` or `screening='none'`.
+- Canonical SRDM flux-file source is:
+  `https://github.com/hlxuhep/Solar-Reflected-Dark-Matter-Flux`.
+- Support/missing-scope tracking: consult `tests/current_status.md` when present, plus the repo's “Still Missing / Not Yet Validated” status documentation.
+
 ## Architecture
 
 ### Core Package: `DMeRates/`
@@ -82,3 +94,40 @@ jupyter notebook modulation_study/modulation_rates_generating.ipynb
 **Electron-hole pair probabilities**: Silicon uses interpolated Ramanathan-Kurinsky probabilities from `p100k.dat` (100K data). Germanium always uses the step function approximation (`change_to_step()` is called automatically).
 
 **Integration**: The `integrate=True` path uses `torchquad.Simpson` for numerical q-integration; `integrate=False` uses a Riemann sum over the precomputed q-grid. QEDark form factors always use `integrate=False`.
+
+---
+
+## Current Support and Validation Status
+
+Last updated: 2026-04-30, after noble-gas SRDM smoke coverage. Full detail in
+[`tests/current_status.md`](tests/current_status.md).
+
+### Fully supported and validated
+
+- Legacy QEDark halo paths (SHM, Tsallis, DPL)
+- Legacy QCDark1 halo paths (SHM, Tsallis, DPL)
+- Noble gas (Xe/Ar) halo paths
+- QCDark2 halo path (Si; dielectric HDF5 required at runtime)
+- SRDM vector path for QCDark2 Si — benchmarked vs `../QCDark2` reference at <0.11% rel diff
+- SRDM scalar/approx/approx\_full for QCDark2 Si — same benchmark, all modes <0.13%
+
+### Implemented but validation-limited
+
+- SRDM paths for QCDark1/QEDark (all mediator modes): smoke-tested, no external cross-code calibration
+- Noble gas / wimprates SRDM: vector/dark-photon flux-tail path smoke-tested for Xe/Ar; no external numeric reference
+- QEDark/QCDark1 screened SRDM: Thomas-Fermi and analytic Lindhard screening available; no independent screened-SRDM reference
+- Non-Si QCDark2 materials and SRDM beyond Si: smoke coverage only
+- Fig. 22 visual validation: **not accepted** — discrepancy not yet understood
+
+### Explicitly missing after this merge
+
+- Anisotropic or direction-dependent SRDM flux
+- Auto-download/cache manager for SRDM flux archives; large-grid memory chunking
+- Digitized Fig. 22 numerical regression; full Figs. 23+ constraints/projections reproduction
+- Validated pair-energy constants for GaAs, SiC, Diamond
+
+### Data-dependent validation
+
+- Modulation notebook: requires Dryad/DaMaSCUS/Verne halo data (not in repo)
+- QCDark2 runtime: requires dielectric HDF5 form-factor files (not in repo)
+- Fig. 22 notebook: requires three DPLM flux files committed to `halo_data/srdm/`

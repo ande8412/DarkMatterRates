@@ -12,6 +12,7 @@ References:
 """
 import torch
 import math
+from DMeRates.srdm.mediators import normalize_mediator_spin
 
 
 def gamma(v_over_c: torch.Tensor) -> torch.Tensor:
@@ -166,6 +167,11 @@ def mediator_propagator_inv_sq(
 ) -> torch.Tensor:
     """Inverse squared mediator propagator 1/(omega^2 - q^2 - m_A^2)^2 (QCDark2 eq. A.20 denominator).
 
+    For the validated semiconductor SRDM grids, q is O(10^1-10^5 eV) while
+    omega is O(10^0-10^2 eV), and the q-bounds mask removes inaccessible
+    points before integration. A future grid that can hit an exact propagator
+    pole should mask or regulate that point at the engine boundary.
+
     Args:
         q_eV    : DM momentum, shape (N_q,) or broadcastable.
         omega_eV: energy transfer, shape (N_E,) or broadcastable.
@@ -194,3 +200,47 @@ def reference_propagator_factor(mA_eV: float, alpha_FS: float, me_eV: float) -> 
     """
     alpha_me_sq = (alpha_FS * me_eV) ** 2
     return (mA_eV**2 + alpha_me_sq) ** 2
+
+
+def srdm_integrand_kernel(
+    q_eV: torch.Tensor,
+    omega_eV: torch.Tensor,
+    E_chi_eV: torch.Tensor,
+    mX_eV: float,
+    mA_eV: float,
+    mediator_spin: str,
+) -> torch.Tensor:
+    """Return the SRDM detector kernel matching QCDark2 mediator modes.
+
+    Args:
+        q_eV: momentum-transfer tensor, broadcastable to (N_v, N_q, N_E).
+        omega_eV: energy-transfer tensor, broadcastable to (N_v, N_q, N_E).
+        E_chi_eV: incoming DM energy tensor, broadcastable to (N_v, N_q, N_E).
+        mX_eV: DM mass in eV.
+        mA_eV: mediator mass in eV.
+        mediator_spin: public mediator mode name (or alias `approx full`).
+    """
+    mode = normalize_mediator_spin(mediator_spin)
+    if mode == "approx_full":
+        gamma = E_chi_eV / mX_eV
+        return (
+            q_eV**3
+            / mX_eV
+            * (4.0 * mX_eV**2)
+            / (q_eV**2 + mA_eV**2) ** 2
+            * gamma
+        )
+
+    propagator = mediator_propagator_inv_sq(q_eV, omega_eV, mA_eV)
+    common = q_eV**3 / (E_chi_eV - omega_eV) * propagator
+
+    if mode == "vector":
+        numerator = (2.0 * E_chi_eV - omega_eV) ** 2 - q_eV**2
+    elif mode == "scalar":
+        numerator = q_eV**2 - omega_eV**2 + 4.0 * mX_eV**2
+    elif mode == "approx":
+        numerator = torch.full_like(q_eV, 4.0 * mX_eV**2)
+    else:
+        raise ValueError(f"Unsupported mediator_spin={mediator_spin!r}.")
+
+    return common * numerator

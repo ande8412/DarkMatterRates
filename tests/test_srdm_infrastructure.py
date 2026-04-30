@@ -203,12 +203,14 @@ class TestFluxLoader:
         assert torch.all(torch.isfinite(dphi_dv))
         assert dphi_dv.max() > 0
 
-    def test_load_srdm_flux_unsupported_spin_raises(self):
-        """Unsupported mediator_spin raises NotImplementedError, not FileNotFoundError."""
+    def test_load_srdm_flux_non_vector_modes_reuse_vector_flux(self):
+        """Non-vector detector modes reuse the vector flux file by policy."""
         from DMeRates.srdm.flux_loader import load_srdm_flux
-        for spin in ('scalar', 'approx', 'approx_full'):
-            with pytest.raises(NotImplementedError, match=spin):
-                load_srdm_flux(48232.9466, 1.098541e-38, 2, spin)
+        v_vec, phi_vec = load_srdm_flux(48232.9466, 1.098541e-38, 2, "vector")
+        for spin in ("scalar", "approx", "approx_full", "approx full"):
+            v_mode, phi_mode = load_srdm_flux(48232.9466, 1.098541e-38, 2, spin)
+            assert torch.equal(v_mode, v_vec)
+            assert torch.equal(phi_mode, phi_vec)
 
     def test_load_srdm_flux_miss_raises(self):
         """Unregistered tuple raises FileNotFoundError with tuple and manifest path."""

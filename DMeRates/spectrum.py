@@ -9,6 +9,10 @@ class RateSpectrum:
 
     E and dR_dE carry numericalunits units throughout. To express in a
     specific unit, divide by it (e.g., dR_dE / (1/(nu.kg * nu.year * nu.eV))).
+
+    Metadata keys are backend-dependent. SRDM-producing engines additionally set
+    keys such as: `halo_model`, `mediator_spin`, `flux_file`, `sigma_e_cm2`,
+    and `variant`.
     """
     E: torch.Tensor               # energy array, shape (N_E,)
     dR_dE: torch.Tensor           # differential rate, shape (N_E,)
