@@ -6,12 +6,16 @@ from scipy import interpolate
 from scipy.interpolate import interp1d, interp2d
 from scipy.interpolate import UnivariateSpline
 import astropy
-from astropy.coordinates import EarthLocation
+from astropy.coordinates import EarthLocation, get_sun, AltAz
+from astropy.time import Time
+from astropy.utils import iers
 import astropy.units as u
 import csv
 from pylab import meshgrid,cm,imshow,contour,clabel,colorbar,axis,title,show
 from numpy import exp,arange
 import matplotlib.pyplot as plt
+
+iers.conf.auto_download = False
 
 """
 calculate the local sidereal time (LAST) 
@@ -256,3 +260,107 @@ sites = {
     key: {"loc": get_site_thetaiso_loc(key)}
     for key in SITE_COORDS
 }
+
+
+# ---------------------------------------------------------------------------
+# Solar-beam SRDM angle helpers (Step D2)
+# These compute the file-facing SRDM beam angle for SRDMBeam flux lookup.
+# Do NOT use ThetaIso() for this purpose — that is the galactic halo-wind angle.
+# Convention: 0 deg = overhead, 90 deg = horizon, 180 deg = nadir.
+# ---------------------------------------------------------------------------
+
+def _normalize_location_to_earthlocation(location):
+    """Convert site string or EarthLocation to EarthLocation."""
+    if isinstance(location, EarthLocation):
+        return location
+    if isinstance(location, str):
+        return get_site_location(location)
+    raise TypeError(f"Expected site string or EarthLocation, got {type(location)}")
+
+
+def _srdm_iso_from_alt_deg(alt_deg):
+    """Return srdm_isoangle_deg from solar altitude in degrees."""
+    return float(np.clip(90.0 - alt_deg, 0.0, 180.0))
+
+
+def _internal_gamma_from_alt_deg(alt_deg):
+    """Return propagation-code internal gamma from solar altitude in degrees."""
+    return float(np.clip(90.0 + alt_deg, 0.0, 180.0))
+
+
+def _solar_alt_deg(location, time):
+    """Return solar altitude in degrees using Astropy AltAz frame."""
+    earth_loc = _normalize_location_to_earthlocation(location)
+    altaz_frame = AltAz(obstime=time, location=earth_loc)
+    sun = get_sun(time)
+    sun_altaz = sun.transform_to(altaz_frame)
+    return float(sun_altaz.alt.to_value(u.deg))
+
+
+def SolarBeamIsoAngle(location, time):
+    """File-facing SRDM beam angle in degrees for SRDMBeam flux lookup.
+
+    Returns srdm_isoangle_deg: 0=overhead, 90=horizon, 180=nadir.
+    location: site string or EarthLocation.
+    time: astropy.time.Time.
+    """
+    alt_deg = _solar_alt_deg(location, time)
+    return _srdm_iso_from_alt_deg(alt_deg)
+
+
+def SolarBeamInternalGamma(location, time):
+    """Propagation-code internal gamma in degrees (diagnostic only).
+
+    Returns gamma_internal_deg: 0=nadir, 90=horizon, 180=overhead.
+    Not used for ring-index lookup; use SolarBeamIsoAngle() for that.
+    location: site string or EarthLocation.
+    time: astropy.time.Time.
+    """
+    alt_deg = _solar_alt_deg(location, time)
+    return _internal_gamma_from_alt_deg(alt_deg)
+
+
+def angle_to_ring_index(srdm_isoangle_deg, ring_count):
+    """Map srdm_isoangle_deg to a zero-based integer ring index.
+
+    ring_index = floor(srdm_isoangle_deg / 180.0 * ring_count)
+    Clipped to [0, ring_count - 1]. Out-of-range angles are clipped.
+    ring_count must be a positive integer.
+    """
+    if ring_count <= 0:
+        raise ValueError(f"ring_count must be positive, got {ring_count}")
+    raw = int(np.floor(srdm_isoangle_deg / 180.0 * ring_count))
+    return min(max(raw, 0), ring_count - 1)
+
+
+def get_solar_angle_limits(location, date):
+    """Return (min_srdm_isoangle_deg, max_srdm_isoangle_deg) over one sidereal day.
+
+    date: [day, month, year] list, e.g. [8, 8, 2024].
+    location: site string or EarthLocation.
+    Samples at 1-minute cadence.
+    """
+    _, angles = solar_daily_angle_series(location, date, cadence_minutes=1)
+    return float(np.min(angles)), float(np.max(angles))
+
+
+def solar_daily_angle_series(location, date, cadence_minutes=10):
+    """Return (times, srdm_isoangle_deg_array) sampled over one UTC day.
+
+    date: [day, month, year] list, e.g. [8, 8, 2024].
+    location: site string or EarthLocation.
+    Returns (astropy.time.Time array, numpy.ndarray of float64).
+    """
+    d, m, y = int(date[0]), int(date[1]), int(date[2])
+    t0 = Time(f"{y:04d}-{m:02d}-{d:02d}T00:00:00", format="isot", scale="utc")
+    n_steps = int(24 * 60 / cadence_minutes)
+    offsets = np.arange(n_steps) * cadence_minutes / (24.0 * 60.0)
+    times = t0 + offsets * u.day
+
+    earth_loc = _normalize_location_to_earthlocation(location)
+    altaz_frame = AltAz(obstime=times, location=earth_loc)
+    sun = get_sun(times)
+    sun_altaz = sun.transform_to(altaz_frame)
+    alt_degs = sun_altaz.alt.to_value(u.deg)
+    angles = np.clip(90.0 - alt_degs, 0.0, 180.0)
+    return times, angles

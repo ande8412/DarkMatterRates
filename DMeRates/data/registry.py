@@ -32,6 +32,9 @@ class DataRegistry:
     # --- QCDark2 data root (external; override via env var) ---
     qcdark2_root: Path = _default_qcdark2_root()
 
+    # --- Default destination for 'python -m DMeRates fetch-data' ---
+    bundled_qcdark2_root: Path = _REPO_ROOT / "form_factors" / "QCDark2"
+
     # --- QCDark2 dielectric file paths ---
     @classmethod
     def qcdark2_dielectric(cls, material_key: str, variant: str) -> Path:

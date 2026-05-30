@@ -37,6 +37,9 @@ dev = [
 ]
 # dft = []  # TODO: add QCDark2 DFT-generation dependencies when required
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
 [tool.setuptools.packages.find]
 include = ["DMeRates*"]
 

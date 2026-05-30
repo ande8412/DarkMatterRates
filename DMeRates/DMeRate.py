@@ -26,12 +26,75 @@ from .screening.semiconductor import (
 )
 from .screening.thomas_fermi import thomas_fermi_screening, tfscreening
 import numericalunits as nu
+import numpy as np
 
 
 
 
 _SEMICONDUCTOR_MATERIALS = ('Si', 'Ge', 'GaAs', 'SiC', 'Diamond', 'diamond')
 _NOBLE_MATERIALS = ('Xe', 'Ar')
+_SRDM_HALO_MODELS = {'srdm', 'srdm_modulated'}
+_SRDMBEAM_SOURCE = 'SRDMBeam'
+_SRDMBEAM_MODULATED_SOURCES = {'SRDMBeam', 'Verne', 'DaMaSCUS'}
+_ORDINARY_MODULATED_HALO_MODELS = {'modulated', 'summer'}
+
+
+def _validate_srdm_modulated_call(halo_model, isoangle, modulated_source):
+    """Validate SRDMBeam-only public kwargs without touching other halo paths."""
+    if halo_model == 'srdm_modulated':
+        if modulated_source is None:
+            modulated_source = _SRDMBEAM_SOURCE
+        from .srdm.flux_loader import normalize_srdmbeam_modulated_source
+        modulated_source = normalize_srdmbeam_modulated_source(modulated_source)
+        if modulated_source not in _SRDMBEAM_MODULATED_SOURCES:
+            raise ValueError(
+                f"Unsupported modulated_source={modulated_source!r} for "
+                f"halo_model='srdm_modulated'; expected one of "
+                f"{sorted(_SRDMBEAM_MODULATED_SOURCES)}"
+            )
+        if isoangle is None:
+            raise ValueError(
+                "halo_model='srdm_modulated' requires an explicit integer "
+                "isoangle/ring_index"
+            )
+        if not isinstance(isoangle, (int, np.integer)):
+            raise ValueError(
+                f"halo_model='srdm_modulated' isoangle/ring_index must be an integer, "
+                f"got {isoangle!r}"
+            )
+        return modulated_source
+
+    if modulated_source is not None:
+        raise ValueError(
+            "modulated_source is only supported with halo_model='srdm_modulated'"
+        )
+    return None
+
+
+def _normalize_ordinary_modulation_source(modulation_source):
+    key = str(modulation_source).strip().lower().replace('-', '_')
+    if key == 'verne':
+        return 'Verne'
+    if key in ('damascus', 'damascus_shm'):
+        return 'DaMaSCUS'
+    raise ValueError(
+        f"Unsupported modulation_source={modulation_source!r}; expected "
+        "'Verne' or 'DaMaSCUS'"
+    )
+
+
+def _resolve_ordinary_modulation_source(halo_model, useVerne, modulation_source):
+    """Resolve explicit ordinary halo-modulation source while preserving useVerne."""
+    if modulation_source is None:
+        return useVerne
+    if halo_model not in _ORDINARY_MODULATED_HALO_MODELS:
+        raise ValueError(
+            "modulation_source is only supported with ordinary "
+            "halo_model='modulated' or halo_model='summer'. For SRDMBeam use "
+            "halo_model='srdm_modulated' with modulated_source='Verne' or "
+            "'DaMaSCUS'."
+        )
+    return _normalize_ordinary_modulation_source(modulation_source) == 'Verne'
 
 
 
@@ -308,14 +371,12 @@ class DMeRate:
         Returns:
             Array of probabilities for each energy bin
         """
-        import os
         import torch
 
-        filepath = os.path.join(self.module_dir, "p100k.dat")
         return rk_probabilities(
             ne=ne,
             energy_array=self.Earr,
-            p100k_path=filepath,
+            p100k_path=DataRegistry.p100K_dat,
             dtype=torch.get_default_dtype(),
         )
 
@@ -739,20 +800,18 @@ class DMeRate:
 
     def _qcdark2_probabilities(self, nes, pair_energy=None):
         """Construct ne probability rows for the QCDark2 energy grid."""
-        import os
         import torch
 
         material = canonical_qcdark2_material(self.material)
         pair_energy_nu = self._qcdark2_pair_energy_to_nu(pair_energy)
 
         if material == 'Si':
-            p100_path = os.path.join(self.module_dir, "p100k.dat")
             rows = []
             for ne in nes:
                 probs = rk_probabilities(
                     ne=int(ne),
                     energy_array=self.Earr,
-                    p100k_path=p100_path,
+                    p100k_path=DataRegistry.p100K_dat,
                     dtype=torch.get_default_dtype(),
                 )
                 rows.append(torch.where(torch.isnan(probs), 0, probs))
@@ -824,11 +883,20 @@ class DMeRate:
         debug=False,
         mediator_spin='vector',
         sigma_e=None,
+        modulated_source=None,
+        srdm_base_data_dir=None,
+        modulation_source=None,
     ):
         """Calculate QCDark2 ne rates by integrating the native dielectric dR/dE."""
         import numpy
         import torch
-        if halo_model == 'srdm':
+        useVerne = _resolve_ordinary_modulation_source(
+            halo_model,
+            useVerne,
+            modulation_source,
+        )
+        modulated_source = _validate_srdm_modulated_call(halo_model, isoangle, modulated_source)
+        if halo_model in _SRDM_HALO_MODELS:
             from .srdm.mediators import normalize_mediator_spin
             mediator_spin = normalize_mediator_spin(mediator_spin)
 
@@ -875,7 +943,7 @@ class DMeRate:
                 eta_provider = lambda vmins, params=halo_id_params: self.get_halo_data(
                     vmins, halo_model, halo_id_params=params
                 )
-            elif halo_model not in {"imb", "srdm"}:
+            elif halo_model not in {"imb", "srdm", "srdm_modulated"}:
                 self.setup_halo_data(
                     mX,
                     FDMn,
@@ -895,6 +963,9 @@ class DMeRate:
                 variant=variant,
                 sigma_e_cm2=sigma_e_cm2,
                 mediator_spin=mediator_spin,
+                ring_index=isoangle,
+                modulated_source=modulated_source,
+                srdm_base_data_dir=srdm_base_data_dir,
                 rhoX_eV_per_cm3=rhoX_eV_per_cm3,
                 halo_distribution=self.DM_Halo,
                 eta_provider=eta_provider,
@@ -923,8 +994,16 @@ class DMeRate:
         halo_id_params=None,
         useVerne=False,
         calcErrors=None,
+        mediator_spin='vector',
+        sigma_e=None,
+        modulated_source=None,
+        srdm_base_data_dir=None,
     ):
         """Return native QCDark2 dR/dE spectrum for a single mass point."""
+        modulated_source = _validate_srdm_modulated_call(halo_model, isoangle, modulated_source)
+        if halo_model in _SRDM_HALO_MODELS:
+            from .srdm.mediators import normalize_mediator_spin
+            mediator_spin = normalize_mediator_spin(mediator_spin)
         if screening is None:
             raise ValueError(
                 "QCDark2 calculations require an explicit screening choice. "
@@ -933,14 +1012,14 @@ class DMeRate:
         if variant is None:
             variant = getattr(self, 'qcdark2_variant', 'composite')
         rhoX_eV_per_cm3 = float(self.rhoX * nu.c0**2 / (nu.eV / nu.cm**3))
-        sigma_e_cm2 = float(self.cross_section / nu.cm**2)
+        sigma_e_cm2 = float(self.cross_section / nu.cm**2) if sigma_e is None else float(sigma_e)
         dielectric = self._qcdark2_dielectric_for_variant(variant)
         eta_provider = None
         if halo_id_params is not None:
             eta_provider = lambda vmins, params=halo_id_params: self.get_halo_data(
                 vmins, halo_model, halo_id_params=params
             )
-        elif halo_model not in {"imb", "srdm"}:
+        elif halo_model not in {"imb", "srdm", "srdm_modulated"}:
             self.setup_halo_data(
                 mX,
                 FDMn,
@@ -959,6 +1038,10 @@ class DMeRate:
             screening=screening,
             variant=variant,
             sigma_e_cm2=sigma_e_cm2,
+            mediator_spin=mediator_spin,
+            ring_index=isoangle,
+            modulated_source=modulated_source,
+            srdm_base_data_dir=srdm_base_data_dir,
             rhoX_eV_per_cm3=rhoX_eV_per_cm3,
             halo_distribution=self.DM_Halo,
             eta_provider=eta_provider,
@@ -985,7 +1068,7 @@ class DMeRate:
             return 0.0 * (1 / (nu.kg * nu.year))
         return torch.trapezoid(spectrum.dR_dE[mask], x=spectrum.E[mask], axis=0)
     
-    def calculate_semiconductor_rates(self,mX_array,halo_model,FDMn,ne,integrate=True,DoScreen=True,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,screening=None,variant=None,pair_energy=None,mediator_spin='vector',sigma_e=None,lindhard_eta_eV=DEFAULT_LINDHARD_ETA_EV):
+    def calculate_semiconductor_rates(self,mX_array,halo_model,FDMn,ne,integrate=True,DoScreen=True,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,screening=None,variant=None,pair_energy=None,mediator_spin='vector',sigma_e=None,lindhard_eta_eV=DEFAULT_LINDHARD_ETA_EV,modulated_source=None,srdm_base_data_dir=None,modulation_source=None):
         """Calculate rates for semiconductor crystals (Si, Ge).
         
         Args:
@@ -1008,7 +1091,13 @@ class DMeRate:
         """
         import torch
         import numpy
-        if halo_model == 'srdm':
+        useVerne = _resolve_ordinary_modulation_source(
+            halo_model,
+            useVerne,
+            modulation_source,
+        )
+        modulated_source = _validate_srdm_modulated_call(halo_model, isoangle, modulated_source)
+        if halo_model in _SRDM_HALO_MODELS:
             from .srdm.mediators import normalize_mediator_spin
             mediator_spin = normalize_mediator_spin(mediator_spin)
         if self.form_factor_type == 'qcdark2':
@@ -1027,6 +1116,9 @@ class DMeRate:
                 debug=debug,
                 mediator_spin=mediator_spin,
                 sigma_e=sigma_e,
+                modulated_source=modulated_source,
+                srdm_base_data_dir=srdm_base_data_dir,
+                modulation_source=modulation_source,
             )
         if self.material == 'Ge':
             if self.ionization_func is not self.step_probabilities:
@@ -1075,7 +1167,7 @@ class DMeRate:
 
         debug_last_dRdE = None
         for m,mX in enumerate(mX_array):
-            if halo_model == 'srdm':
+            if halo_model in _SRDM_HALO_MODELS:
                 spectrum = compute_form_factor_spectrum(
                     material=self.material,
                     mX=mX,
@@ -1100,6 +1192,9 @@ class DMeRate:
                     mediator_spin=mediator_spin,
                     screening=screening,
                     lindhard_eta_eV=lindhard_eta_eV,
+                    ring_index=isoangle,
+                    modulated_source=modulated_source,
+                    srdm_base_data_dir=srdm_base_data_dir,
                 )
                 self.Earr = spectrum.E
                 dRdne = semiconductor_rates_from_spectrum(
@@ -1433,7 +1528,7 @@ class DMeRate:
 
 
 
-    def calculate_nobleGas_rates(self,mX_array,halo_model,FDMn,ne,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,returnShells=False,sigma_e=None,mediator_spin='vector'):
+    def calculate_nobleGas_rates(self,mX_array,halo_model,FDMn,ne,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,returnShells=False,sigma_e=None,mediator_spin='vector',modulated_source=None,srdm_base_data_dir=None,modulation_source=None):
         """Calculate rates for noble gas targets (Xe, Ar).
         
             Args:
@@ -1455,6 +1550,15 @@ class DMeRate:
         """
         import torch
         import numpy
+        useVerne = _resolve_ordinary_modulation_source(
+            halo_model,
+            useVerne,
+            modulation_source,
+        )
+        modulated_source = _validate_srdm_modulated_call(halo_model, isoangle, modulated_source)
+        if halo_model in _SRDM_HALO_MODELS:
+            from .srdm.mediators import normalize_mediator_spin
+            mediator_spin = normalize_mediator_spin(mediator_spin)
 
         if type(mX_array) != torch.tensor:
             if type(mX_array) == int or type(mX_array) == float:
@@ -1500,7 +1604,7 @@ class DMeRate:
         sigma_e_cm2 = float(self.cross_section / nu.cm**2) if sigma_e is None else float(sigma_e)
         
         for m,mX in enumerate(mX_array):
-            if halo_model == 'srdm':
+            if halo_model in _SRDM_HALO_MODELS:
                 spectrum = noble_srdm_dRdE_spectrum(
                     material=self.material,
                     mX=mX,
@@ -1513,6 +1617,10 @@ class DMeRate:
                     reduced_mass_fn=self.reduced_mass,
                     fdm_fn=self.FDM,
                     vmin_tensor_fn=self.vMin_tensor,
+                    halo_model=halo_model,
+                    modulated_source=modulated_source,
+                    ring_index=isoangle,
+                    srdm_base_data_dir=srdm_base_data_dir,
                 )
                 drs = spectrum.shell_spectra
             else:
@@ -1544,7 +1652,7 @@ class DMeRate:
 
 
 
-    def calculate_rates(self,mX_array,halo_model,FDMn,ne,integrate=True,DoScreen=True,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,screening=None,variant=None,pair_energy=None,mediator_spin='vector',sigma_e=None,lindhard_eta_eV=DEFAULT_LINDHARD_ETA_EV):
+    def calculate_rates(self,mX_array,halo_model,FDMn,ne,integrate=True,DoScreen=True,isoangle=None,halo_id_params=None,useVerne=False,calcErrors=None,debug=False,screening=None,variant=None,pair_energy=None,mediator_spin='vector',sigma_e=None,lindhard_eta_eV=DEFAULT_LINDHARD_ETA_EV,modulated_source=None,srdm_base_data_dir=None,modulation_source=None):
         """Main rate calculation method that routes to appropriate implementation.
         
         Args:
@@ -1558,6 +1666,11 @@ class DMeRate:
             lindhard_eta_eV: Lindhard imaginary broadening in eV
             isoangle: isoangle (for modulated distributions) (number from 0 -35 with the true isoangle being 5x that value)
             halo_id_params: Parameters for step function model (used for halo independent analysis)
+            modulated_source: SRDMBeam upstream source ('Verne', 'DaMaSCUS', or 'SRDMBeam').
+                Only valid with halo_model='srdm_modulated'. Not to be confused with
+                modulation_source, which selects the ordinary halo-DM modulation source.
+            modulation_source: Ordinary halo modulation source ('Verne' or 'DaMaSCUS').
+                Only valid with halo_model='modulated' or 'summer'. Overrides useVerne.
             useVerne: Use Verne distribution
             calcErrors: Calculate errors ('High'/'Low')
             debug: Return debug information
@@ -1565,7 +1678,13 @@ class DMeRate:
         Returns:
             Calculated rates
         """
-        if halo_model == 'srdm':
+        useVerne = _resolve_ordinary_modulation_source(
+            halo_model,
+            useVerne,
+            modulation_source,
+        )
+        modulated_source = _validate_srdm_modulated_call(halo_model, isoangle, modulated_source)
+        if halo_model in _SRDM_HALO_MODELS:
             from .srdm.mediators import normalize_mediator_spin
             mediator_spin = normalize_mediator_spin(mediator_spin)
         if self.form_factor_type == 'qcdark2':
@@ -1587,6 +1706,9 @@ class DMeRate:
                 mediator_spin=mediator_spin,
                 sigma_e=sigma_e,
                 lindhard_eta_eV=lindhard_eta_eV,
+                modulated_source=modulated_source,
+                srdm_base_data_dir=srdm_base_data_dir,
+                modulation_source=modulation_source,
             )
         if self.material == 'Si' or self.material =='Ge':
             return self.calculate_semiconductor_rates(
@@ -1607,6 +1729,9 @@ class DMeRate:
                 mediator_spin=mediator_spin,
                 sigma_e=sigma_e,
                 lindhard_eta_eV=lindhard_eta_eV,
+                modulated_source=modulated_source,
+                srdm_base_data_dir=srdm_base_data_dir,
+                modulation_source=modulation_source,
             )
         if self.material == 'Xe' or self.material == 'Ar':
             return self.calculate_nobleGas_rates(
@@ -1622,6 +1747,9 @@ class DMeRate:
                 returnShells=False,
                 sigma_e=sigma_e,
                 mediator_spin=mediator_spin,
+                modulated_source=modulated_source,
+                srdm_base_data_dir=srdm_base_data_dir,
+                modulation_source=modulation_source,
             )
     
     
@@ -1686,7 +1814,7 @@ class DMeRate:
             gday = self.calculate_rates(mX,dm_halo_model,fdm,ne_bins,integrate=integrate,DoScreen=DoScreen).T * nu.g * nu.day
             gday = gday[0]
             gday = torch.where(torch.isnan(gday),0,gday)
-            g_day = gday.numpy()
+            g_day = gday.detach().cpu().numpy()
             for ne in ne_bins:
                 data[m,ne - 1] = g_day[ne-1]
                 line+=str(g_day[ne-1])+'\t'

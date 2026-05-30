@@ -7,8 +7,10 @@
 __pycache__
 .vscode
 
-halo_data/modulated
-halo_data/modulated_legacy
+halo_data/*
+.codex
+.agents/
+
 halo_independent
 modulation_study/fitted_damascus_modulated_rates*
 modulation_study/damascus_modulated_rates*
@@ -44,3 +46,7 @@ agent_summaries/
 tests/fig22_paper_reference/
 tests/fig22_comparison.png
 tests/tests/
+tests/fixtures/
+form_factors/QCDark2/dielectric_functions/composite/*.h5
+form_factors/QCDark2/dielectric_functions/lfe/*.h5
+form_factors/QCDark2/dielectric_functions/nolfe/*.h5

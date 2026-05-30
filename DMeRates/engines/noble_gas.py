@@ -2,7 +2,6 @@ import numericalunits as nu
 import torch
 
 from DMeRates.Constants import skip_keys
-from DMeRates.data.registry import DataRegistry
 from DMeRates.spectrum import RateSpectrum
 from DMeRates.srdm.mediators import normalize_mediator_spin
 
@@ -152,6 +151,10 @@ def noble_srdm_dRdE_spectrum(
     reduced_mass_fn,
     fdm_fn,
     vmin_tensor_fn,
+    halo_model: str = "srdm",
+    modulated_source: str | None = None,
+    ring_index: int | None = None,
+    srdm_base_data_dir=None,
 ):
     """Return a shell-resolved noble-gas SRDM RateSpectrum for one mass point.
 
@@ -164,13 +167,19 @@ def noble_srdm_dRdE_spectrum(
             "Noble-gas SRDM currently supports mediator_spin='vector' only."
         )
 
-    from DMeRates.srdm.flux_loader import load_srdm_flux
-    from DMeRates.srdm.manifest import find_entry
+    from DMeRates.srdm.flux_loader import resolve_srdm_flux_source
 
     mX_eV = float(mX) * 1.0e6
-    v_flux, dphi_dv = load_srdm_flux(mX_eV, sigma_e_cm2, FDMn, mediator_spin)
-    entry = find_entry(mX_eV, sigma_e_cm2, FDMn, mediator_spin)
-    flux_file = DataRegistry.srdm_flux_file(entry["filename"])
+    v_flux, dphi_dv, flux_metadata = resolve_srdm_flux_source(
+        source=modulated_source if halo_model == "srdm_modulated" else None,
+        mX_MeV=float(mX),
+        mX_eV=mX_eV,
+        sigma_e_cm2=sigma_e_cm2,
+        FDMn=FDMn,
+        mediator_spin=mediator_spin,
+        ring_index=ring_index,
+        base_data_dir=srdm_base_data_dir,
+    )
     v_grid, integrand_grid, tail_grid = _srdm_flux_tail_grid(v_flux, dphi_dv)
 
     mX_nu = mX * nu.MeV / nu.c0**2
@@ -202,10 +211,13 @@ def noble_srdm_dRdE_spectrum(
         material=material,
         backend="noble_gas",
         metadata={
-            "halo_model": "srdm",
+            "halo_model": halo_model,
             "mediator_spin": mediator_spin,
             "flux_mediator_spin": "vector",
-            "flux_file": str(flux_file),
+            "flux_file": flux_metadata.get("flux_file"),
+            "flux_source": flux_metadata.get("flux_source"),
+            "ring_index": flux_metadata.get("ring_index"),
+            "ring_count": flux_metadata.get("ring_count"),
             "mX_eV": mX_eV,
             "sigma_e_cm2": float(sigma_e_cm2),
             "FDMn": int(FDMn),

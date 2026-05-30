@@ -278,6 +278,10 @@ def _compute_dRdE_srdm(
     screening,
     variant: str = "composite",
     dielectric=None,
+    halo_model: str = "srdm",
+    flux_source=None,
+    ring_index: int | None = None,
+    srdm_base_data_dir=None,
 ) -> "DielectricRateResult":
     """Native QCDark2 SRDM dR/dE.
 
@@ -311,16 +315,21 @@ def _compute_dRdE_srdm(
     # dPhi/d(v/c) in numericalunits, so the engine integrates that directly over
     # dimensionless v/c. Do not convert back to raw dPhi/dv_kms here; that
     # convention is only for QCDark2 reference-code matching in the notebook.
-    from DMeRates.srdm.flux_loader import load_srdm_flux as _load_flux
-    from DMeRates.srdm.manifest import find_entry as _find_entry
-    from DMeRates.data.registry import DataRegistry as _DR
+    from DMeRates.srdm.flux_loader import resolve_srdm_flux_source
 
-    v_tensor, dphi_tensor = _load_flux(mX_eV, sigma_e_cm2, FDMn, mediator_spin)
-    entry = _find_entry(mX_eV, sigma_e_cm2, FDMn, mediator_spin)
-    _resolved_flux_path = _DR.srdm_flux_file(entry["filename"])
+    v_tensor, dphi_tensor, flux_metadata = resolve_srdm_flux_source(
+        source=flux_source,
+        mX_MeV=float(mX_eV) / 1.0e6,
+        mX_eV=mX_eV,
+        sigma_e_cm2=sigma_e_cm2,
+        FDMn=FDMn,
+        mediator_spin=mediator_spin,
+        ring_index=ring_index,
+        base_data_dir=srdm_base_data_dir,
+    )
 
-    v_oc = v_tensor.numpy()
-    dphi_dv_over_c = dphi_tensor.numpy() * float(nu.cm**2 * nu.s)
+    v_oc = v_tensor.detach().cpu().numpy()
+    dphi_dv_over_c = dphi_tensor.detach().cpu().numpy() * float(nu.cm**2 * nu.s)
 
     # ---- Material constants.
     V_cell_eV3 = V_cell_bohr / ame_eV**3
@@ -386,7 +395,7 @@ def _compute_dRdE_srdm(
     sigma_per_v = sigma_per_v * prefactor_v[:, None]
 
     # ---- v-integration via trapezoid; convert to events/kg/year/eV.
-    dR = torch.trapezoid(sigma_per_v * phi[:, None], v, dim=0).numpy()
+    dR = torch.trapezoid(sigma_per_v * phi[:, None], v, dim=0).detach().cpu().numpy()
     dRdE_bare = (N_cell / M_cell_eV) * dR * kg_QCD / sec2yr
 
     # ---- Wrap in RateSpectrum.
@@ -400,10 +409,13 @@ def _compute_dRdE_srdm(
         material=material,
         backend="qcdark2",
         metadata=dict(
-            halo_model="srdm",
+            halo_model=halo_model,
             mediator_spin=mediator_spin,
             flux_mediator_spin=flux_spin,
-            flux_file=str(_resolved_flux_path),
+            flux_file=flux_metadata.get("flux_file"),
+            flux_source=flux_metadata.get("flux_source"),
+            ring_index=flux_metadata.get("ring_index"),
+            ring_count=flux_metadata.get("ring_count"),
             mX_eV=float(mX_eV),
             sigma_e_cm2=float(sigma_e_cm2),
             FDMn=int(FDMn),
@@ -432,6 +444,9 @@ def compute_dRdE(
     eta_provider=None,              # optional vectorized eta(v_min_nu) provider
     dielectric=None,                # optional pre-loaded dielectric_response
     mediator_spin: str = "vector",  # required for SRDM; ignored for halo models
+    ring_index: int | None = None,
+    modulated_source: str | None = None,
+    srdm_base_data_dir=None,
 ):
     """Native QCDark2 dR/dE.
 
@@ -467,7 +482,7 @@ def compute_dRdE(
         and a `.spectrum: RateSpectrum` ready for downstream DMeRates code.
     """
     # ---- SRDM dispatch (solar-reflected DM uses external flux, not halo eta).
-    if halo_model == "srdm":
+    if halo_model in {"srdm", "srdm_modulated"}:
         return _compute_dRdE_srdm(
             material=material,
             mX_eV=mX_eV,
@@ -477,6 +492,10 @@ def compute_dRdE(
             screening=screening,
             variant=variant,
             dielectric=dielectric,
+            halo_model=halo_model,
+            flux_source=modulated_source if halo_model == "srdm_modulated" else None,
+            ring_index=ring_index,
+            srdm_base_data_dir=srdm_base_data_dir,
         )
 
     # ---- Required-screening guard and normalization (Step 3.4 policy).

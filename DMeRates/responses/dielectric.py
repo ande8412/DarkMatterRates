@@ -45,7 +45,12 @@ class dielectric_response:
         else:
             path = Path(filename)
         if not Path(path).is_file():
-            raise FileNotFoundError(f"QCDark2 dielectric file not found: {path}")
+            raise FileNotFoundError(
+                f"QCDark2 dielectric file not found: {path}\n"
+                "Run  python -m DMeRates fetch-data  to download the dielectric files.\n"
+                "To fetch only this material/variant: "
+                f"python -m DMeRates fetch-data -m {material} -v {variant}"
+            )
 
         self.path = str(path)
         q_amu = nu.alphaFS * nu.me * nu.c0

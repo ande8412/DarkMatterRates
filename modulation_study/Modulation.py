@@ -5,6 +5,67 @@ import numericalunits as nu
 northcolor='#2E88D1'
 southcolor='#D1772E'
 
+
+def _ordinary_modulation_source_to_use_verne(modulation_source):
+    if modulation_source is None:
+        return None
+    key = str(modulation_source).strip().lower().replace("-", "_")
+    if key == "verne":
+        return True
+    if key in ("damascus", "damascus_shm"):
+        return False
+    raise ValueError(
+        f"Unsupported ordinary modulation_source={modulation_source!r}; "
+        "expected 'Verne' or 'DaMaSCUS'"
+    )
+
+
+def _srdmbeam_representative_angles_for_indices(metadata, ring_indices):
+    """Return SRDMBeam representative angles for interpolation and plotting."""
+    import warnings
+    import numpy as np
+
+    ring_count = int(metadata["ring_count"])
+    representative_angles = metadata.get("angle_representative_deg")
+    if representative_angles is None:
+        representative_angles = metadata.get("file_isoangle_deg")
+    if representative_angles is None:
+        raw_metadata = metadata.get("raw_metadata", {})
+        if "file_isoangle_deg" in raw_metadata:
+            representative_angles = raw_metadata["file_isoangle_deg"]
+        elif metadata.get("angle_grid_type") == "bin_average":
+            bin_edges = metadata.get("angle_bin_edges_deg")
+            if bin_edges is None:
+                bin_edges = np.linspace(0.0, 180.0, ring_count + 1)
+            bin_edges = np.asarray(bin_edges, dtype=float)
+            representative_angles = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+
+    if representative_angles is None:
+        warnings.warn(
+            "SRDMBeam metadata has no angle_representative_deg; using the "
+            "legacy lower-edge angle grid idx * 180 / ring_count for "
+            "interpolation.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return np.array(
+            [int(idx) * 180.0 / ring_count for idx in ring_indices],
+            dtype=float,
+        )
+
+    angle_grid = np.asarray(representative_angles, dtype=float)
+    if angle_grid.ndim != 1 or angle_grid.size != ring_count:
+        raise ValueError(
+            "SRDMBeam angle_representative_deg must contain one angle per ring: "
+            f"expected {ring_count}, got shape {angle_grid.shape}"
+        )
+
+    selected = np.array([angle_grid[int(idx)] for idx in ring_indices], dtype=float)
+    if not np.all(np.isfinite(selected)):
+        raise ValueError("SRDMBeam angle_representative_deg contains non-finite values")
+    return selected
+
+
 def _create_dmrate(material, useQCDark=True):
     """Create DMeRate with engine-compatible form-factor selection."""
     import DMeRates
@@ -76,7 +137,7 @@ def round_to_sig_figs(x, sig_figs=3):
     # Note: Python's round() uses "round half to even" for .5 cases.
     return round(x, exponent)
 
-def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,useQCDark=True,DoScreen = True,verbose = False,flat=False,dmRateObject = None,summer=False):
+def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,useQCDark=True,DoScreen = True,verbose = False,flat=False,dmRateObject = None,summer=False,modulation_source=None):
     """Calculate modulated DM-electron scattering rates for given parameters.
     
     Args:
@@ -85,7 +146,9 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
         sigmaE (float): DM-electron cross section in cm^2
         fdm (int): Form factor model (0=FDM1, 2=FDMq2)
         ne (int/list): Electron bin(s) to calculate rates for
-        useVerne (bool): Use Verne velocity distribution (default True)
+        modulation_source (str/None): Explicit ordinary modulation source,
+            "Verne" or "DaMaSCUS". Overrides legacy useVerne when supplied.
+        useVerne (bool): Legacy selector; True means Verne, False means DaMaSCUS.
         calcError (str/None): Calculate error (only applies to DaMaSCUS (useVerne=False)) ('High'/'Low') (default None)
         useQCDark (bool): Use QCDark form factor (default True)
         DoScreen (bool): Include screening effects (default True)
@@ -104,6 +167,10 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
     import torch
     import sys
     sys.path.append('..')
+
+    explicit_use_verne = _ordinary_modulation_source_to_use_verne(modulation_source)
+    if explicit_use_verne is not None:
+        useVerne = explicit_use_verne
 
     if dmRateObject is not None:
         dmrates = dmRateObject
@@ -136,8 +203,10 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
 
 
     if os.path.isdir(loc_dir) and len(os.listdir(loc_dir)) > 0:
-        dir_contents = os.listdir(loc_dir)
-        dir_contents = [i for i in dir_contents if i != '.DS_Store']
+        dir_contents = [
+            i for i in os.listdir(loc_dir)
+            if i.startswith("DM_Eta_theta_") and i.endswith(".txt")
+        ]
         num_angles = len(dir_contents)
         
         # isoangles = np.arange(num_angles) * (180 / num_angles)
@@ -151,7 +220,7 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
                 if flat:
                     result = dmrates.calculate_rates(mX,'shm',fdm,ne,integrate=integrate,DoScreen=DoScreen,isoangle=None,useVerne=useVerne,calcErrors=calcError).flatten()
                 else:
-                    result = dmrates.calculate_rates(mX,halo_model,fdm,ne,integrate=integrate,DoScreen=DoScreen,isoangle=isoangle,useVerne=useVerne,calcErrors=calcError).flatten()
+                    result = dmrates.calculate_rates(mX,halo_model,fdm,ne,integrate=integrate,DoScreen=DoScreen,isoangle=isoangle,useVerne=useVerne,calcErrors=calcError,modulation_source=calc_str).flatten()
                 # if kgday:
                 #     result*= nu.kg *nu.day
                 # else:
@@ -170,6 +239,208 @@ def get_modulated_rates(material,mX,sigmaE,fdm,ne,useVerne=True,calcError=None,u
         
         print(loc_dir)
         return
+
+
+def get_srdm_modulated_rates(
+    material,
+    mX,
+    sigmaE,
+    fdm,
+    ne,
+    modulated_source="SRDMBeam",
+    useQCDark=True,
+    DoScreen=True,
+    screening=None,
+    variant=None,
+    pair_energy=None,
+    mediator_spin="vector",
+    dmRateObject=None,
+    base_data_dir=None,
+    verbose=False,
+):
+    """Calculate SRDMBeam rates for each available file-facing beam ring.
+
+    Returns ``(srdm_isoangles_deg, rate_per_angle)``. The angle values are the
+    representative SRDMBeam angles from metadata, with 0 deg overhead and
+    180 deg nadir. For Verne point-sampled files these are the emitted
+    ``file_isoangle_deg`` nodes; for DaMaSCUS ring-averaged files they are bin
+    centers. This helper is SRDMBeam-specific and does not use the ordinary
+    ThetaIso() halo-wind modulation path.
+    """
+    import numpy as np
+    import torch
+
+    from DMeRates.srdm.flux_loader import (
+        available_srdmbeam_ring_indices,
+        load_srdmbeam_metadata,
+    )
+
+    metadata = load_srdmbeam_metadata(
+        mX,
+        sigmaE,
+        fdm,
+        modulated_source=modulated_source,
+        base_data_dir=base_data_dir,
+    )
+    ring_count = int(metadata["ring_count"])
+    ring_indices = available_srdmbeam_ring_indices(
+        mX,
+        sigmaE,
+        fdm,
+        modulated_source=modulated_source,
+        base_data_dir=base_data_dir,
+    )
+    if not ring_indices:
+        ring_indices = list(range(ring_count))
+
+    if dmRateObject is not None:
+        dmrates = dmRateObject
+    else:
+        dmrates = _create_dmrate(material, useQCDark=useQCDark)
+
+    if hasattr(dmrates, "update_crosssection"):
+        dmrates.update_crosssection(sigmaE)
+
+    if isinstance(ne, (int, np.integer)):
+        ne_values = [ne]
+    else:
+        ne_values = list(ne)
+
+    srdm_isoangles_np = _srdmbeam_representative_angles_for_indices(metadata, ring_indices)
+    angle_order = np.argsort(srdm_isoangles_np)
+    srdm_isoangles_np = srdm_isoangles_np[angle_order]
+    ring_indices = [ring_indices[int(i)] for i in angle_order]
+
+    integrate = bool(useQCDark)
+    srdm_isoangles_deg = torch.tensor(
+        srdm_isoangles_np,
+        dtype=torch.float64,
+    )
+    rate_rows = []
+    for ring_index in ring_indices:
+        if verbose:
+            print(f"calculating SRDMBeam ring_index={ring_index}")
+        result = dmrates.calculate_rates(
+            mX,
+            "srdm_modulated",
+            fdm,
+            ne_values,
+            integrate=integrate,
+            DoScreen=DoScreen,
+            isoangle=int(ring_index),
+            modulated_source=modulated_source,
+            sigma_e=sigmaE,
+            screening=screening,
+            variant=variant,
+            pair_energy=pair_energy,
+            mediator_spin=mediator_spin,
+            srdm_base_data_dir=base_data_dir,
+        )
+        rate_rows.append(torch.as_tensor(result).flatten().cpu())
+
+    if rate_rows:
+        rate_per_angle = torch.stack(rate_rows)
+    else:
+        rate_per_angle = torch.empty((0, len(ne_values)), dtype=torch.float64)
+    return srdm_isoangles_deg.cpu(), rate_per_angle.cpu()
+
+
+def get_srdm_daily_rates(
+    material,
+    mX,
+    sigmaE,
+    fdm,
+    ne,
+    location,
+    date,
+    cadence_minutes=10,
+    **kwargs,
+):
+    """Return a daily SRDMBeam solar-angle time series and interpolated rates.
+
+    Angles outside the ring grid are extrapolated by holding the nearest ring
+    rate constant. This is accurate for Verne's endpoint-nudged grids (first
+    ring near 0 deg, last ring near 180 deg) but may introduce ~1-2% error
+    for coarse DaMaSCUS grids where the first bin center is far from 0 deg.
+    """
+    import numpy as np
+
+    from modulation_study.isoangle import solar_daily_angle_series
+
+    ring_angles, rate_per_angle = get_srdm_modulated_rates(
+        material,
+        mX,
+        sigmaE,
+        fdm,
+        ne,
+        **kwargs,
+    )
+    times, srdm_isoangles_deg = solar_daily_angle_series(
+        location,
+        date,
+        cadence_minutes=cadence_minutes,
+    )
+
+    angle_grid = np.asarray(ring_angles, dtype=float)
+    rates_grid = np.asarray(rate_per_angle, dtype=float)
+    if angle_grid.size == 0:
+        raise ValueError("No SRDMBeam ring rates were available for daily interpolation")
+    if rates_grid.ndim == 1:
+        rates_grid = rates_grid[:, None]
+
+    order = np.argsort(angle_grid)
+    angle_grid = angle_grid[order]
+    rates_grid = rates_grid[order, :]
+    if angle_grid.size > 1 and np.any(np.diff(angle_grid) <= 0.0):
+        raise ValueError("SRDMBeam interpolation angles must be strictly increasing")
+
+    interp_angles = angle_grid
+    interp_rates = rates_grid
+    if angle_grid[0] > 0.0:
+        interp_angles = np.concatenate([[0.0], interp_angles])
+        interp_rates = np.vstack([rates_grid[0, :], interp_rates])
+    if angle_grid[-1] < 180.0:
+        interp_angles = np.concatenate([interp_angles, [180.0]])
+        interp_rates = np.vstack([interp_rates, rates_grid[-1, :]])
+
+    daily_rates = np.vstack(
+        [
+            np.interp(
+                srdm_isoangles_deg,
+                interp_angles,
+                interp_rates[:, col],
+                left=interp_rates[0, col],
+                right=interp_rates[-1, col],
+            )
+            for col in range(interp_rates.shape[1])
+        ]
+    ).T
+    return times, srdm_isoangles_deg, daily_rates
+
+
+def get_srdm_daily_modulation_amplitude(*args, **kwargs):
+    """Return min/max and fractional daily modulation for SRDMBeam rates."""
+    import numpy as np
+
+    times, srdm_isoangles_deg, daily_rates = get_srdm_daily_rates(*args, **kwargs)
+    rates = np.asarray(daily_rates, dtype=float)
+    rate_min = np.min(rates, axis=0)
+    rate_max = np.max(rates, axis=0)
+    mean = 0.5 * (rate_max + rate_min)
+    fractional = np.divide(
+        rate_max - rate_min,
+        mean,
+        out=np.zeros_like(rate_max),
+        where=mean != 0,
+    )
+    return {
+        "times": times,
+        "srdm_isoangles_deg": srdm_isoangles_deg,
+        "daily_rates": rates,
+        "rate_min": rate_min,
+        "rate_max": rate_max,
+        "fractional_modulation": fractional,
+    }
 
     
     
@@ -630,7 +901,7 @@ def plot_damascus_output(test_mX,FDMn,cross_section,long=True,savefig=False,cmap
     else:
         long_str = ''
     halo_dir = f'../halo_data/modulated/{mediator}/DaMaSCUS{long_str}/mDM_{mX_str}_MeV_sigmaE_{cross_section}_cm2{long_str}/'
-    steps = len(os.listdir(halo_dir))
+    steps = len([f for f in os.listdir(halo_dir) if f.endswith('.txt')])
     actual_angle = np.linspace(0,180,steps)
     for isoangle in range(steps):
         ai = actual_angle[isoangle]
@@ -746,7 +1017,7 @@ def plot_damascus_figure(test_mX,cross_section,long=True,savefig=False,cmap_name
     for i,FDMn in enumerate([0,2]):
         mediator = fdm_dict[FDMn]
         halo_dir = f'../halo_data/modulated/{mediator}/DaMaSCUS{dirend}/mDM_{mX_str}_MeV_sigmaE_{cross_section}_cm2{long_str}/'
-        steps = len(os.listdir(halo_dir))
+        steps = len([f for f in os.listdir(halo_dir) if f.endswith('.txt')])
         actual_angle = np.linspace(0,180,steps)
         for isoangle in range(steps):
             ai = actual_angle[isoangle]
@@ -881,7 +1152,7 @@ def get_damascus_output(mX,sigmaE,FDMn):
     sigmaE = float(format(sigmaE, '.3g'))
     ddir = f'halo_data/modulated/{dir_stir}/DaMaSCUS/mDM_{mX_str}_MeV_sigmaE_{sigmaE}_cm2/'
     data = []
-    num_angles = len(os.listdir(ddir))
+    num_angles = len([f for f in os.listdir(ddir) if f.endswith('.txt')])
     for i in range(num_angles):
         file = ddir + f'DM_Eta_theta_{i}.txt'
         filedata = np.loadtxt(file,delimiter='\t')

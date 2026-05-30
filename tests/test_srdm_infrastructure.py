@@ -140,11 +140,6 @@ class TestFluxLoader:
         Uses mX=48232.9466 eV, sigma=1.098541e-38 cm^2 (DPLM grid row=10, col=8,
         closest to nominal 50 keV / 1e-38 cm^2).
         """
-        import random
-        random.seed(0)
-        import numericalunits
-        numericalunits.reset_units(seed=0)
-
         from DMeRates.srdm.flux_loader import load_srdm_flux
         # Use actual grid values recorded in manifest
         v_over_c, dphi_dv = load_srdm_flux(48232.9466, 1.098541e-38, 2, 'vector')
@@ -165,31 +160,21 @@ class TestFluxLoader:
 
     def test_load_srdm_flux_unit_conversion_is_bare_c_kms(self):
         """dPhi/d(v/c) conversion uses bare c[km/s], not randomized nu.c0."""
-        import random
-        random.seed(0)
-        import numericalunits
-        numericalunits.reset_units(seed=0)
-
         from DMeRates.srdm.flux_loader import load_srdm_flux
 
         raw = np.loadtxt("halo_data/srdm/srdm_dphidv_DPLM_row10_col8.txt", comments="#")
         v_over_c, dphi_dv = load_srdm_flux(48232.9466, 1.098541e-38, 2, 'vector')
 
-        c_kms_bare = numericalunits.c0 / (numericalunits.km / numericalunits.s)
+        c_kms_bare = nu.c0 / (nu.km / nu.s)
         expected_v0 = raw[1, 0] / c_kms_bare
         expected_dphi0 = raw[1, 1] * c_kms_bare
-        got_dphi0 = float(dphi_dv[0] / (1.0 / (numericalunits.cm**2 * numericalunits.s)))
+        got_dphi0 = float(dphi_dv[0] / (1.0 / (nu.cm**2 * nu.s)))
 
         assert float(v_over_c[0]) == pytest.approx(expected_v0, rel=1e-12)
         assert got_dphi0 == pytest.approx(expected_dphi0, rel=1e-12)
 
     def test_load_srdm_flux_smoke_second_entry(self):
         """load_srdm_flux with second manifest entry (0.5 MeV nominal, DPLM_15_20) works."""
-        import random
-        random.seed(0)
-        import numericalunits
-        numericalunits.reset_units(seed=0)
-
         from DMeRates.srdm.flux_loader import load_srdm_flux
         # Actual grid values for DPLM row=15, col=20
         v_over_c, dphi_dv = load_srdm_flux(510927.7440, 1.151395e-37, 2, 'vector')
@@ -214,11 +199,6 @@ class TestFluxLoader:
 
     def test_load_srdm_flux_miss_raises(self):
         """Unregistered tuple raises FileNotFoundError with tuple and manifest path."""
-        import random
-        random.seed(0)
-        import numericalunits
-        numericalunits.reset_units(seed=0)
-
         from DMeRates.srdm.flux_loader import load_srdm_flux
         from DMeRates.data.registry import DataRegistry
 

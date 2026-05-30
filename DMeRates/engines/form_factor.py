@@ -19,6 +19,7 @@ from DMeRates.srdm.mediators import (
 _LEGACY_QEDARK_ENERGY_NORM = 1.0 * nu.eV
 _VALID_MEDIATORS = {0, 2}
 _QEDARK_LEGACY_WK = 2.0 / 137.0
+_SRDM_HALO_MODELS = {"srdm", "srdm_modulated"}
 
 
 def _FORM_FACTOR_TO_S_PREFACTOR(q_eV, V_cell_eV3, *, alpha_FS, me_eV):
@@ -119,6 +120,10 @@ def _compute_dRdE_srdm_form_factor(
     form_factor=None,
     screening: str | None = None,
     lindhard_eta_eV: float = DEFAULT_LINDHARD_ETA_EV,
+    halo_model: str = "srdm",
+    flux_source=None,
+    ring_index: int | None = None,
+    srdm_base_data_dir=None,
 ) -> RateSpectrum:
     """SRDM rate from a crystal form factor f^2(q, omega).
 
@@ -137,23 +142,28 @@ def _compute_dRdE_srdm_form_factor(
             f"Unsupported FDMn={FDMn}. Supported: {sorted(_VALID_MEDIATORS)}"
         )
 
-    from DMeRates.data.registry import DataRegistry as _DR
     from DMeRates.engines.dielectric import (
         _LARGE_MA_EV,
         _qcdark2_constants_bare,
         _qcdark2_half_open_mask,
     )
-    from DMeRates.srdm.flux_loader import load_srdm_flux
+    from DMeRates.srdm.flux_loader import resolve_srdm_flux_source
     from DMeRates.srdm.kinematics import (
         q_bounds,
         reference_propagator_factor,
         srdm_integrand_kernel,
     )
-    from DMeRates.srdm.manifest import find_entry
 
-    v_tensor, dphi_tensor = load_srdm_flux(mX_eV, sigma_e_cm2, FDMn, mediator_spin)
-    entry = find_entry(mX_eV, sigma_e_cm2, FDMn, mediator_spin)
-    flux_file = _DR.srdm_flux_file(entry["filename"])
+    v_tensor, dphi_tensor, flux_metadata = resolve_srdm_flux_source(
+        source=flux_source,
+        mX_MeV=float(mX_eV) / 1.0e6,
+        mX_eV=mX_eV,
+        sigma_e_cm2=sigma_e_cm2,
+        FDMn=FDMn,
+        mediator_spin=mediator_spin,
+        ring_index=ring_index,
+        base_data_dir=srdm_base_data_dir,
+    )
 
     q_eV, E_eV, f2, V_cell_eV3, M_cell_eV = _form_factor_srdm_grids(
         backend=backend,
@@ -245,10 +255,13 @@ def _compute_dRdE_srdm_form_factor(
         material=material,
         backend=backend,
         metadata=dict(
-            halo_model="srdm",
+            halo_model=halo_model,
             mediator_spin=mediator_spin,
             flux_mediator_spin=flux_spin,
-            flux_file=str(flux_file),
+            flux_file=flux_metadata.get("flux_file"),
+            flux_source=flux_metadata.get("flux_source"),
+            ring_index=flux_metadata.get("ring_index"),
+            ring_count=flux_metadata.get("ring_count"),
             mX_eV=float(mX_eV),
             sigma_e_cm2=float(sigma_e_cm2),
             FDMn=int(FDMn),
@@ -285,9 +298,12 @@ def semiconductor_dRdE_spectrum(
     mediator_spin: str = "vector",
     screening: str | None = None,
     lindhard_eta_eV: float = DEFAULT_LINDHARD_ETA_EV,
+    ring_index: int | None = None,
+    modulated_source: str | None = None,
+    srdm_base_data_dir=None,
 ):
     """Extracted semiconductor differential-rate engine for QEDark/QCDark1."""
-    if halo_model == "srdm":
+    if halo_model in _SRDM_HALO_MODELS:
         backend = "qedark" if QEDark else "qcdark1"
         return _compute_dRdE_srdm_form_factor(
             backend=backend,
@@ -300,6 +316,10 @@ def semiconductor_dRdE_spectrum(
             form_factor=form_factor,
             screening=screening,
             lindhard_eta_eV=lindhard_eta_eV,
+            halo_model=halo_model,
+            flux_source=modulated_source if halo_model == "srdm_modulated" else None,
+            ring_index=ring_index,
+            srdm_base_data_dir=srdm_base_data_dir,
         )
 
     mX = mX * nu.MeV / nu.c0**2
